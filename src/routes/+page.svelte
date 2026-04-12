@@ -6,8 +6,7 @@
     Download,
     FolderInput,
     Search,
-    Settings2,
-    Sparkles
+    Settings2
   } from '@lucide/svelte';
 
   import Button from '$lib/components/ui/button.svelte';
@@ -486,10 +485,6 @@
           >
             <Settings2 size={14} />
             Use AppData Config
-          </Button>
-          <Button variant="secondary" onclick={() => void withBusy(() => presetStore.rebuildTrayMenu(), 'Tray menu rebuilt')}>
-            <Sparkles size={14} />
-            Rebuild Tray
           </Button>
         </div>
       </div>

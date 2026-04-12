@@ -15,7 +15,8 @@ async function refresh() {
 }
 
 async function runMutation(task: () => Promise<PresetLibrary>) {
-  const snapshot = await task();
+  await task();
+  const snapshot = await backend.rebuildTrayMenu();
   library.set(snapshot);
   return snapshot;
 }
@@ -67,5 +68,9 @@ export const presetStore = {
     backend.exportPreset(group, name, destination),
   exportAppSettings: (destination: string) => backend.exportAppSettings(destination),
   importAppSettings: (source: string) => runMutation(() => backend.importAppSettings(source)),
-  rebuildTrayMenu: () => runMutation(() => backend.rebuildTrayMenu())
+  rebuildTrayMenu: async () => {
+    const snapshot = await backend.rebuildTrayMenu();
+    library.set(snapshot);
+    return snapshot;
+  }
 };
