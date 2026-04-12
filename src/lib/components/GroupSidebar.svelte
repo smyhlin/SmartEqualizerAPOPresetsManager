@@ -257,11 +257,11 @@
               class="min-w-0 flex-1 text-left"
             >
               <span class="block truncate text-sm font-medium text-foreground">{group.name}</span>
-              <span class="mt-1 block text-xs text-muted">
-                {group.presets.length} presets
+              <span class="mt-1 flex min-w-0 items-center gap-2 text-xs text-muted">
+                <span class="shrink-0">{group.presets.length} presets</span>
                 {#if group.activePreset}
-                  <span class="ml-2 rounded-full border border-accent/30 bg-accent-soft px-2 py-0.5 text-[11px] text-accent">
-                    Active {group.activePreset}
+                  <span class="shrink-0 rounded-full border border-accent/30 bg-accent-soft px-1.5 py-0 text-[10px] uppercase tracking-wider text-accent">
+                    Active
                   </span>
                 {/if}
               </span>
