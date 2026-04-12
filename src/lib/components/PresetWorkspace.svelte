@@ -279,7 +279,7 @@
                       </span>
                     {/if}
                   </span>
-                  <span class="mt-1 block overflow-hidden text-xs leading-5 text-muted [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:3]">
+                  <span class="mt-1 block truncate text-xs leading-5 text-muted">
                     {getPresetPreview(preset.content)}
                   </span>
                 </span>
