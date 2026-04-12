@@ -1,17 +1,12 @@
 <script lang="ts">
-  import { FolderPlus, Pencil, Trash2 } from '@lucide/svelte';
+  import { FolderPlus, GripVertical, Pencil, Trash2 } from '@lucide/svelte';
+  import { draggable, droppable, type DragDropState } from '@thisux/sveltednd';
 
   import EmojiPicker from '$lib/components/EmojiPicker.svelte';
   import Button from '$lib/components/ui/button.svelte';
   import Input from '$lib/components/ui/input.svelte';
   import type { PresetGroup, PresetItem } from '$lib/types';
   import { cn } from '$lib/utils';
-
-  type MovePreset = {
-    oldGroup: string;
-    newGroup: string;
-    name: string;
-  };
 
   let {
     groups = [],
@@ -33,12 +28,11 @@
     onRename?: (value: { oldName: string; newName: string }) => void;
     onDelete?: (name: string) => void;
     onReorder?: (order: string[]) => void;
-    onMovePreset?: (value: MovePreset) => void;
+    onMovePreset?: (value: { oldGroup: string; newGroup: string; name: string }) => void;
     onEmojiChange?: (value: { groupName: string; emoji: string | null }) => void;
   }>();
 
-  const GROUP_DRAG_TYPE = 'application/x-smart-eq-group';
-  const PRESET_DRAG_TYPE = 'application/x-smart-eq-preset';
+  const GROUP_CONTAINER = 'sidebar-groups';
 
   let creating = $state(false);
   let newGroupName = $state('');
@@ -50,22 +44,16 @@
 
   let visibleGroups = $derived.by(() => {
     const query = search.trim().toLowerCase();
-    if (!query) {
-      return groups;
-    }
-
-    return groups.filter((group: PresetGroup) => {
-      return (
-        group.name.toLowerCase().includes(query) ||
-        group.presets.some((preset: PresetItem) => {
-          return (
-            preset.name.toLowerCase().includes(query) ||
-            preset.content.toLowerCase().includes(query)
-          );
-        })
-      );
-    });
+    if (!query) return groups;
+    return groups.filter((g: PresetGroup) =>
+      g.name.toLowerCase().includes(query) ||
+      g.presets.some((p: PresetItem) =>
+        p.name.toLowerCase().includes(query) || p.content.toLowerCase().includes(query)
+      )
+    );
   });
+
+  // ── Create / rename ────────────────────────────────────────────────────────
 
   function startCreate() {
     creating = true;
@@ -77,10 +65,7 @@
 
   function submitCreate() {
     const trimmed = newGroupName.trim();
-    if (!trimmed) {
-      return;
-    }
-
+    if (!trimmed) return;
     onCreate?.({ name: trimmed, emoji: newGroupEmoji });
     creating = false;
     creatingEmojiOpen = false;
@@ -100,7 +85,6 @@
       editingValue = '';
       return;
     }
-
     onRename?.({ oldName: groupName, newName: trimmed });
     editingGroupName = null;
     editingValue = '';
@@ -119,43 +103,43 @@
     emojiPickerGroupName = null;
   }
 
-  function handleDragStart(event: DragEvent, groupName: string) {
-    event.dataTransfer?.setData(GROUP_DRAG_TYPE, groupName);
-    event.dataTransfer?.setData('text/plain', groupName);
-    if (event.dataTransfer && event.currentTarget instanceof HTMLElement) {
-      event.dataTransfer.setDragImage(event.currentTarget, 14, 14);
-    }
-  }
+  // ── Group reorder drop ─────────────────────────────────────────────────────
 
-  function handleDrop(event: DragEvent, targetGroupName: string) {
-    event.preventDefault();
+  function handleGroupDrop(state: DragDropState<PresetGroup>) {
+    const { draggedItem, targetContainer } = state;
+    if (!targetContainer || targetContainer !== GROUP_CONTAINER) return;
 
-    const presetPayload = event.dataTransfer?.getData(PRESET_DRAG_TYPE);
-    if (presetPayload) {
-      const selection = JSON.parse(presetPayload) as MovePreset;
-      onMovePreset?.({
-        oldGroup: selection.oldGroup,
-        newGroup: targetGroupName,
-        name: selection.name
-      });
-      return;
-    }
+    const targetGroupName = state.targetElement?.closest('[data-group-name]')?.getAttribute('data-group-name');
+    if (!targetGroupName || targetGroupName === draggedItem.name) return;
 
-    const draggedGroupName = event.dataTransfer?.getData(GROUP_DRAG_TYPE);
-    if (!draggedGroupName || draggedGroupName === targetGroupName) {
-      return;
-    }
-
-    const nextOrder = groups.map((group: PresetGroup) => group.name);
-    const sourceIndex = nextOrder.indexOf(draggedGroupName);
+    const nextOrder = groups.map((g: PresetGroup) => g.name);
+    const sourceIndex = nextOrder.indexOf(draggedItem.name);
     const targetIndex = nextOrder.indexOf(targetGroupName);
-    if (sourceIndex < 0 || targetIndex < 0) {
-      return;
-    }
+    if (sourceIndex < 0 || targetIndex < 0) return;
 
     nextOrder.splice(sourceIndex, 1);
-    nextOrder.splice(targetIndex, 0, draggedGroupName);
+    nextOrder.splice(targetIndex, 0, draggedItem.name);
     onReorder?.(nextOrder);
+  }
+
+  // ── Preset drop onto group card ───────────────────────────────────────────
+  // Each group card is a droppable zone with container ID = `drop-group-<name>`.
+  // PresetWorkspace drags use `presets-<groupName>` as source container.
+
+  function handlePresetDropOnGroup(targetGroupName: string, state: DragDropState<PresetItem>) {
+    const { draggedItem, sourceContainer } = state;
+
+    const oldGroup = sourceContainer.startsWith('presets-')
+      ? sourceContainer.slice('presets-'.length)
+      : sourceContainer;
+
+    if (oldGroup === targetGroupName) return;
+
+    onMovePreset?.({
+      oldGroup,
+      newGroup: targetGroupName,
+      name: draggedItem.name,
+    });
   }
 </script>
 
@@ -166,7 +150,6 @@
         <div class="text-sm font-medium text-foreground">Groups</div>
         <div class="mt-0.5 text-xs text-muted">{visibleGroups.length} visible</div>
       </div>
-
       <Button size="icon" variant="secondary" onclick={startCreate}>
         <FolderPlus size={16} />
       </Button>
@@ -177,10 +160,7 @@
         <Input
           bind:value={newGroupName}
           placeholder="Group name"
-          onkeydown={(event) => {
-            if (event.key === 'Enter') submitCreate();
-            if (event.key === 'Escape') creating = false;
-          }}
+          onkeydown={(e) => { if (e.key === 'Enter') submitCreate(); if (e.key === 'Escape') creating = false; }}
         />
         <div class="mt-2 flex justify-end gap-2">
           <Button size="sm" variant="ghost" onclick={() => (creating = false)}>Cancel</Button>
@@ -212,15 +192,30 @@
       </div>
     {/if}
 
-    {#each visibleGroups as group}
+    {#each visibleGroups as group (group.name)}
+      <!--
+        Each group card:
+        - draggable (for group reordering) via the grip handle only
+        - droppable (for preset cross-group move) via its own unique container ID
+      -->
       <div
+        data-group-name={group.name}
+        use:draggable={{
+          container: GROUP_CONTAINER,
+          dragData: group,
+          handle: '.group-drag-handle',
+          attributes: { draggingClass: 'opacity-30 grayscale' }
+        }}
+        use:droppable={{
+          container: `drop-group-${group.name}`,
+          callbacks: {
+            onDrop: (state: DragDropState<PresetItem>) => handlePresetDropOnGroup(group.name, state)
+          },
+          attributes: { dragOverClass: 'border-accent bg-accent/10 shadow-[inset_3px_0_0_0_var(--color-accent)]' }
+        }}
         role="listitem"
-        draggable="true"
-        ondragstart={(event) => handleDragStart(event, group.name)}
-        ondragover={(event) => event.preventDefault()}
-        ondrop={(event) => handleDrop(event, group.name)}
         class={cn(
-          'mb-2 rounded-[10px] border p-2 transition-colors',
+          'mb-2 rounded-[10px] border p-2 transition-colors duration-150',
           selectedGroupName === group.name
             ? 'border-accent/60 bg-surface-2'
             : 'border-border bg-surface-2 hover:bg-surface-3'
@@ -229,9 +224,9 @@
         {#if editingGroupName === group.name}
           <Input
             bind:value={editingValue}
-            onkeydown={(event) => {
-              if (event.key === 'Enter') submitRename(group.name);
-              if (event.key === 'Escape') editingGroupName = null;
+            onkeydown={(e) => {
+              if (e.key === 'Enter') submitRename(group.name);
+              if (e.key === 'Escape') editingGroupName = null;
             }}
           />
           <div class="mt-2 flex justify-end gap-2">
@@ -239,7 +234,15 @@
             <Button size="sm" onclick={() => submitRename(group.name)}>Save</Button>
           </div>
         {:else}
-          <div class="flex items-start gap-2">
+          <div class="flex items-center gap-2">
+            <!-- Grip handle: only this initiates a GROUP drag -->
+            <div
+              class="group-drag-handle shrink-0 cursor-grab touch-none text-muted/40 hover:text-muted active:cursor-grabbing"
+              aria-label="Drag to reorder group"
+            >
+              <GripVertical size={14} />
+            </div>
+
             <Button
               size="icon"
               variant="outline"
@@ -281,6 +284,7 @@
               </Button>
             </div>
           </div>
+
           {#if emojiPickerGroupName === group.name}
             <EmojiPicker
               selected={group.emoji}

@@ -1,0 +1,4 @@
+[build]
+# Keep Cargo build artifacts outside src-tauri so the dev watcher does not race
+# with rustc writing archives under src-tauri/target on Windows.
+target-dir = "../.cargo-target"

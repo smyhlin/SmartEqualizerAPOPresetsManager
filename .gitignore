@@ -74,5 +74,6 @@ package-lock.json.backup
 # Tauri & Rust
 src-tauri/target/
 src-tauri/gen/
+.cargo-target/
 **/*.rs.bk
 Cargo.lock.backup

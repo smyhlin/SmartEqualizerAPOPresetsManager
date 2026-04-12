@@ -1,16 +1,11 @@
 <script lang="ts">
-  import { CheckCircle2, FilePlus2, FolderInput, Pencil, Trash2, Zap } from '@lucide/svelte';
+  import { CheckCircle2, FilePlus2, FolderInput, GripVertical, Pencil, Trash2, Zap } from '@lucide/svelte';
+  import { draggable, droppable, type DragDropState } from '@thisux/sveltednd';
 
   import Button from '$lib/components/ui/button.svelte';
   import Input from '$lib/components/ui/input.svelte';
   import type { PresetGroup, PresetItem } from '$lib/types';
   import { cn } from '$lib/utils';
-
-  type MovePreset = {
-    oldGroup: string;
-    newGroup: string;
-    name: string;
-  };
 
   let {
     group = null,
@@ -38,7 +33,8 @@
     onImport?: () => void;
   }>();
 
-  const PRESET_DRAG_TYPE = 'application/x-smart-eq-preset';
+  // Container ID for the sveltednd library — unique per group so items know their origin.
+  let containerId = $derived(group ? `presets-${group.name}` : 'presets-none');
 
   let creating = $state(false);
   let newPresetName = $state('');
@@ -48,32 +44,20 @@
   let visiblePresets = $derived.by(() => {
     const list = group?.presets ?? [];
     const query = search.trim().toLowerCase();
-    if (!query) {
-      return list;
-    }
-
-    return list.filter((preset: PresetItem) => {
-      return (
-        preset.name.toLowerCase().includes(query) ||
-        preset.content.toLowerCase().includes(query)
-      );
-    });
+    if (!query) return list;
+    return list.filter((p: PresetItem) =>
+      p.name.toLowerCase().includes(query) || p.content.toLowerCase().includes(query)
+    );
   });
 
   function groupLabel(value: PresetGroup | null) {
-    if (!value) {
-      return 'Presets';
-    }
-
+    if (!value) return 'Presets';
     return `${value.emoji ? `${value.emoji} ` : ''}${value.name}`;
   }
 
   function submitCreate() {
     const trimmed = newPresetName.trim();
-    if (!trimmed) {
-      return;
-    }
-
+    if (!trimmed) return;
     onCreate?.(trimmed);
     creating = false;
     newPresetName = '';
@@ -91,42 +75,27 @@
       editingValue = '';
       return;
     }
-
     onRename?.({ oldName, newName: trimmed });
     editingPresetName = null;
     editingValue = '';
   }
 
-  function handleDragStart(event: DragEvent, name: string) {
-    if (!group) {
-      return;
-    }
+  // Called when a preset is reordered within the SAME group, or dropped from another group.
+  function handleDrop(state: DragDropState<PresetItem>) {
+    const { draggedItem, sourceContainer, targetContainer } = state;
+    if (!group || !targetContainer) return;
 
-    const payload = JSON.stringify({ oldGroup: group.name, name });
-    event.dataTransfer?.setData(PRESET_DRAG_TYPE, payload);
-    event.dataTransfer?.setData('text/plain', payload);
-    if (event.dataTransfer) {
-      event.dataTransfer.effectAllowed = 'move';
-    }
-  }
+    const targetGroupName = targetContainer.startsWith('presets-')
+      ? targetContainer.slice('presets-'.length)
+      : targetContainer;
 
-  function handleDrop(event: DragEvent, targetIndex?: number) {
-    event.preventDefault();
-    if (!group) {
-      return;
-    }
-
-    const payload = event.dataTransfer?.getData(PRESET_DRAG_TYPE);
-    if (!payload) {
-      return;
-    }
-
-    const selection = JSON.parse(payload) as MovePreset;
+    // Find index from position (if reordering within same group keep targetIndex vague)
     onMove?.({
-      oldGroup: selection.oldGroup,
-      newGroup: group.name,
-      name: selection.name,
-      targetIndex
+      oldGroup: sourceContainer.startsWith('presets-')
+        ? sourceContainer.slice('presets-'.length)
+        : sourceContainer,
+      newGroup: targetGroupName,
+      name: draggedItem.name,
     });
   }
 
@@ -143,10 +112,8 @@
 <section class="flex h-full min-h-0 flex-col overflow-hidden border-r border-border bg-surface">
   <div class="border-b border-border px-3 py-3">
     <div class="flex items-center justify-between gap-3">
-      <div>
-        <div class="text-sm font-medium text-foreground">
-          {groupLabel(group)}
-        </div>
+      <div class="min-w-0 flex-1">
+        <div class="text-sm font-medium text-foreground">{groupLabel(group)}</div>
         <div class="mt-0.5 text-xs text-muted">
           {group ? `${visiblePresets.length} visible` : 'Select a group'}
         </div>
@@ -158,23 +125,11 @@
       </div>
 
       {#if group}
-        <div class="flex items-center gap-2">
-          <Button
-            size="icon"
-            variant="secondary"
-            title="Import presets into this group"
-            ariaLabel="Import presets into this group"
-            onclick={() => onImport?.()}
-          >
+        <div class="flex shrink-0 items-center gap-2">
+          <Button size="icon" variant="secondary" title="Import presets" ariaLabel="Import presets" onclick={() => onImport?.()}>
             <FolderInput size={16} />
           </Button>
-          <Button
-            size="icon"
-            variant="secondary"
-            title="Add preset"
-            ariaLabel="Add preset"
-            onclick={() => (creating = !creating)}
-          >
+          <Button size="icon" variant="secondary" title="Add preset" ariaLabel="Add preset" onclick={() => (creating = !creating)}>
             <FilePlus2 size={16} />
           </Button>
         </div>
@@ -186,10 +141,7 @@
         <Input
           bind:value={newPresetName}
           placeholder="Preset name"
-          onkeydown={(event) => {
-            if (event.key === 'Enter') submitCreate();
-            if (event.key === 'Escape') creating = false;
-          }}
+          onkeydown={(e) => { if (e.key === 'Enter') submitCreate(); if (e.key === 'Escape') creating = false; }}
         />
         <div class="mt-2 flex justify-end gap-2">
           <Button size="sm" variant="ghost" onclick={() => (creating = false)}>Cancel</Button>
@@ -204,12 +156,19 @@
       Choose a group to edit its presets.
     </div>
   {:else}
+    <!--
+      The list container is itself a droppable so presets from OTHER groups
+      can be dropped into it (cross-group move).
+    -->
     <div
-      class="min-h-0 flex-1 overflow-x-hidden overflow-y-auto p-3 pr-4 [scrollbar-gutter:stable]"
+      use:droppable={{
+        container: containerId,
+        callbacks: { onDrop: handleDrop },
+        attributes: { dragOverClass: 'ring-1 ring-inset ring-accent/40' }
+      }}
+      class="min-h-0 flex-1 overflow-x-hidden overflow-y-auto p-3 pr-4 [scrollbar-gutter:stable] transition-all duration-150"
       role="list"
       aria-label="Presets"
-      ondragover={(event) => event.preventDefault()}
-      ondrop={(event) => handleDrop(event, visiblePresets.length)}
     >
       {#if visiblePresets.length === 0}
         <div class="rounded-[10px] border border-dashed border-border bg-surface-2 px-3 py-4 text-sm text-muted">
@@ -217,15 +176,21 @@
         </div>
       {/if}
 
-      {#each visiblePresets as preset, index}
+      {#each visiblePresets as preset (preset.name)}
         <div
+          use:draggable={{
+            container: containerId,
+            dragData: preset,
+            handle: '.drag-handle',
+            attributes: { draggingClass: 'opacity-30 grayscale' }
+          }}
+          use:droppable={{
+            container: containerId,
+            callbacks: { onDrop: handleDrop },
+          }}
           role="listitem"
-          draggable="true"
-          ondragstart={(event) => handleDragStart(event, preset.name)}
-          ondragover={(event) => event.preventDefault()}
-          ondrop={(event) => handleDrop(event, index)}
           class={cn(
-            'mb-3 rounded-[10px] border p-3 transition-colors',
+            'mb-2 rounded-[10px] border p-3 transition-colors duration-150 cursor-grab active:cursor-grabbing',
             selectedPresetName === preset.name
               ? 'border-accent/60 bg-surface-2'
               : 'border-border bg-surface-2 hover:bg-surface-3'
@@ -234,9 +199,9 @@
           {#if editingPresetName === preset.name}
             <Input
               bind:value={editingValue}
-              onkeydown={(event) => {
-                if (event.key === 'Enter') submitRename(preset.name);
-                if (event.key === 'Escape') editingPresetName = null;
+              onkeydown={(e) => {
+                if (e.key === 'Enter') submitRename(preset.name);
+                if (e.key === 'Escape') editingPresetName = null;
               }}
             />
             <div class="mt-2 flex justify-end gap-2">
@@ -244,11 +209,15 @@
               <Button size="sm" onclick={() => submitRename(preset.name)}>Save</Button>
             </div>
           {:else}
-            <div class="flex min-w-0 items-start gap-3">
+            <div class="flex min-w-0 items-center gap-3">
+              <div class="drag-handle shrink-0 cursor-grab text-muted/40 hover:text-muted active:cursor-grabbing">
+                <GripVertical size={14} />
+              </div>
+
               <button
                 type="button"
                 class={cn(
-                  'focus-ring mt-0.5 inline-flex size-9 shrink-0 items-center justify-center rounded-[10px] border transition-all duration-150',
+                  'focus-ring inline-flex size-9 shrink-0 items-center justify-center rounded-[10px] border transition-all duration-150',
                   isPresetActive(preset.name)
                     ? 'border-accent/60 bg-accent/12 text-accent shadow-[0_0_0_1px_rgba(163,230,53,0.18),0_0_20px_rgba(163,230,53,0.18)]'
                     : 'border-border bg-background text-muted hover:border-accent/30 hover:bg-accent/8 hover:text-foreground'
@@ -256,10 +225,7 @@
                 title={isPresetActive(preset.name) ? 'Active preset' : 'Activate preset'}
                 aria-label={isPresetActive(preset.name) ? 'Active preset' : 'Activate preset'}
                 aria-pressed={isPresetActive(preset.name)}
-                onclick={(event) => {
-                  event.stopPropagation();
-                  onApply?.(preset.name);
-                }}
+                onclick={(e) => { e.stopPropagation(); onApply?.(preset.name); }}
               >
                 <Zap size={14} />
               </button>
