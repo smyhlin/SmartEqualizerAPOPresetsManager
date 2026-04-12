@@ -1,0 +1,23 @@
+[package]
+name = "smart_equalizer_apo_presets_manager"
+version = "0.1.0"
+description = "SmartEqualizerAPOPresetsManager"
+authors = ["myhli"]
+license = "MIT"
+edition = "2021"
+
+[lib]
+name = "smart_equalizer_apo_presets_manager_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.5.6", features = [] }
+
+[dependencies]
+dirs = "6.0.0"
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.149"
+tauri = { version = "2.10.3", features = ["tray-icon"] }
+tauri-plugin-dialog = "2.7.0"
+thiserror = "2.0.18"
+winreg = "0.56.0"

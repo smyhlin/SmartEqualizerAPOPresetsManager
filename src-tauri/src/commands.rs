@@ -1,0 +1,242 @@
+use std::path::PathBuf;
+
+use tauri::{AppHandle, State};
+
+use crate::{
+    refresh_runtime,
+    state::{AppError, AppState, PresetLibrary},
+};
+
+#[tauri::command]
+pub fn get_config_path(state: State<'_, AppState>) -> Result<String, AppError> {
+    let guard = state.lock()?;
+    Ok(guard.get_config_path())
+}
+
+#[tauri::command]
+pub fn set_config_path(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    new_path: String,
+) -> Result<PresetLibrary, AppError> {
+    {
+        let mut guard = state.lock()?;
+        guard.set_config_path(PathBuf::from(new_path))?;
+    }
+    refresh_runtime(&app)
+}
+
+#[tauri::command]
+pub fn load_presets(state: State<'_, AppState>) -> Result<PresetLibrary, AppError> {
+    let mut guard = state.lock()?;
+    guard.snapshot()
+}
+
+#[tauri::command]
+pub fn apply_preset(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    group: String,
+    name: String,
+) -> Result<PresetLibrary, AppError> {
+    {
+        let mut guard = state.lock()?;
+        guard.apply_preset(&group, &name)?;
+    }
+    refresh_runtime(&app)
+}
+
+#[tauri::command]
+pub fn save_preset(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    group: String,
+    name: String,
+    content: String,
+) -> Result<PresetLibrary, AppError> {
+    {
+        let mut guard = state.lock()?;
+        guard.save_preset(&group, &name, &content)?;
+    }
+    refresh_runtime(&app)
+}
+
+#[tauri::command]
+pub fn create_group(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    name: String,
+) -> Result<PresetLibrary, AppError> {
+    {
+        let mut guard = state.lock()?;
+        guard.create_group(&name)?;
+    }
+    refresh_runtime(&app)
+}
+
+#[tauri::command]
+pub fn set_group_emoji(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    group: String,
+    emoji: Option<String>,
+) -> Result<PresetLibrary, AppError> {
+    {
+        let mut guard = state.lock()?;
+        guard.set_group_emoji(&group, emoji)?;
+    }
+    refresh_runtime(&app)
+}
+
+#[tauri::command]
+pub fn rename_group(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    old_name: String,
+    new_name: String,
+) -> Result<PresetLibrary, AppError> {
+    {
+        let mut guard = state.lock()?;
+        guard.rename_group(&old_name, &new_name)?;
+    }
+    refresh_runtime(&app)
+}
+
+#[tauri::command]
+pub fn delete_group(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    name: String,
+) -> Result<PresetLibrary, AppError> {
+    {
+        let mut guard = state.lock()?;
+        guard.delete_group(&name)?;
+    }
+    refresh_runtime(&app)
+}
+
+#[tauri::command]
+pub fn reorder_groups(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    order: Vec<String>,
+) -> Result<PresetLibrary, AppError> {
+    {
+        let mut guard = state.lock()?;
+        guard.reorder_groups(&order)?;
+    }
+    refresh_runtime(&app)
+}
+
+#[tauri::command]
+pub fn create_preset(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    group: String,
+    name: String,
+    content: Option<String>,
+) -> Result<PresetLibrary, AppError> {
+    {
+        let mut guard = state.lock()?;
+        guard.create_preset(&group, &name, content)?;
+    }
+    refresh_runtime(&app)
+}
+
+#[tauri::command]
+pub fn rename_preset(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    group: String,
+    old_name: String,
+    new_name: String,
+) -> Result<PresetLibrary, AppError> {
+    {
+        let mut guard = state.lock()?;
+        guard.rename_preset(&group, &old_name, &new_name)?;
+    }
+    refresh_runtime(&app)
+}
+
+#[tauri::command]
+pub fn delete_preset(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    group: String,
+    name: String,
+) -> Result<PresetLibrary, AppError> {
+    {
+        let mut guard = state.lock()?;
+        guard.delete_preset(&group, &name)?;
+    }
+    refresh_runtime(&app)
+}
+
+#[tauri::command]
+pub fn move_preset(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    old_group: String,
+    new_group: String,
+    name: String,
+    target_index: Option<usize>,
+) -> Result<PresetLibrary, AppError> {
+    {
+        let mut guard = state.lock()?;
+        guard.move_preset(&old_group, &new_group, &name, target_index)?;
+    }
+    refresh_runtime(&app)
+}
+
+#[tauri::command]
+pub fn import_presets(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    group: String,
+    paths: Vec<String>,
+) -> Result<PresetLibrary, AppError> {
+    {
+        let mut guard = state.lock()?;
+        guard.import_presets(&group, &paths)?;
+    }
+    refresh_runtime(&app)
+}
+
+#[tauri::command]
+pub fn export_preset(
+    state: State<'_, AppState>,
+    group: String,
+    name: String,
+    destination: String,
+) -> Result<String, AppError> {
+    let guard = state.lock()?;
+    guard.export_preset(&group, &name, &PathBuf::from(destination))?;
+    Ok(name)
+}
+
+#[tauri::command]
+pub fn export_app_settings(
+    state: State<'_, AppState>,
+    destination: String,
+) -> Result<(), AppError> {
+    let mut guard = state.lock()?;
+    guard.export_app_settings(&PathBuf::from(destination))
+}
+
+#[tauri::command]
+pub fn import_app_settings(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    source: String,
+) -> Result<PresetLibrary, AppError> {
+    {
+        let mut guard = state.lock()?;
+        guard.import_app_settings(&PathBuf::from(source))?;
+    }
+    refresh_runtime(&app)
+}
+
+#[tauri::command]
+pub fn rebuild_tray_menu(app: AppHandle) -> Result<PresetLibrary, AppError> {
+    refresh_runtime(&app)
+}
