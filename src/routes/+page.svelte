@@ -216,9 +216,6 @@
     );
   }
 
-  async function handleReorderGroups(order: string[]) {
-    await withBusy(() => presetStore.reorderGroups(order), 'Updated group order');
-  }
 
   async function handleCreatePreset(presetName: string) {
     if (!selectedGroupName) {
@@ -499,7 +496,6 @@
         onCreate={handleCreateGroup}
         onRename={handleRenameGroup}
         onDelete={handleDeleteGroup}
-        onReorder={handleReorderGroups}
         onMovePreset={handleMovePreset}
         onEmojiChange={handleSetGroupEmoji}
       />

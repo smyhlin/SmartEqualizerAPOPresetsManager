@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { CheckCircle2, FilePlus2, FolderInput, GripVertical, Pencil, Trash2, Zap } from '@lucide/svelte';
+  import { CheckCircle2, FilePlus2, FolderInput, Pencil, Trash2, Zap } from '@lucide/svelte';
   import { draggable, droppable, type DragDropState } from '@thisux/sveltednd';
 
   import Button from '$lib/components/ui/button.svelte';
@@ -164,9 +164,9 @@
       use:droppable={{
         container: containerId,
         callbacks: { onDrop: handleDrop },
-        attributes: { dragOverClass: 'ring-1 ring-inset ring-accent/40' }
+        attributes: { dragOverClass: 'ring-1 ring-inset ring-accent/40 drag-over-card' }
       }}
-      class="min-h-0 flex-1 overflow-x-hidden overflow-y-auto p-3 pr-4 [scrollbar-gutter:stable] transition-all duration-150"
+      class="drop-zone-indicator min-h-0 flex-1 overflow-x-hidden overflow-y-auto p-3 pr-4 [scrollbar-gutter:stable] transition-all duration-200"
       role="list"
       aria-label="Presets"
     >
@@ -182,7 +182,7 @@
             container: containerId,
             dragData: preset,
             handle: '.drag-handle',
-            attributes: { draggingClass: 'opacity-30 grayscale' }
+            attributes: { draggingClass: 'drag-source-ghost' }
           }}
           use:droppable={{
             container: containerId,
@@ -190,7 +190,7 @@
           }}
           role="listitem"
           class={cn(
-            'mb-2 rounded-[10px] border p-3 transition-colors duration-150 cursor-grab active:cursor-grabbing',
+            'drop-zone-indicator mb-2 rounded-[10px] border p-3 transition-all duration-200',
             selectedPresetName === preset.name
               ? 'border-accent/60 bg-surface-2'
               : 'border-border bg-surface-2 hover:bg-surface-3'
@@ -210,8 +210,10 @@
             </div>
           {:else}
             <div class="flex min-w-0 items-center gap-3">
-              <div class="drag-handle shrink-0 cursor-grab text-muted/40 hover:text-muted active:cursor-grabbing">
-                <GripVertical size={14} />
+              <div class="drag-handle drag-grip shrink-0 text-muted">
+                <div class="drag-grip-dot-row"><span class="drag-grip-dot"></span><span class="drag-grip-dot"></span></div>
+                <div class="drag-grip-dot-row"><span class="drag-grip-dot"></span><span class="drag-grip-dot"></span></div>
+                <div class="drag-grip-dot-row"><span class="drag-grip-dot"></span><span class="drag-grip-dot"></span></div>
               </div>
 
               <button
@@ -258,7 +260,7 @@
                 <Button
                   size="icon"
                   variant="ghost"
-                  class="text-danger hover:bg-danger-soft hover:text-danger"
+                  class="text-danger hover:bg-danger-soft hover:text-danger hover:shadow-[0_0_12px_rgba(239,68,68,0.35)] transition-shadow duration-200"
                   onclick={() => onDelete?.(preset.name)}
                 >
                   <Trash2 size={14} />

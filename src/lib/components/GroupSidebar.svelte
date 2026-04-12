@@ -1,6 +1,6 @@
 <script lang="ts">
-  import { FolderPlus, GripVertical, Pencil, Trash2 } from '@lucide/svelte';
-  import { draggable, droppable, type DragDropState } from '@thisux/sveltednd';
+  import { FolderPlus, Pencil, Trash2 } from '@lucide/svelte';
+  import { droppable, type DragDropState } from '@thisux/sveltednd';
 
   import EmojiPicker from '$lib/components/EmojiPicker.svelte';
   import Button from '$lib/components/ui/button.svelte';
@@ -16,7 +16,7 @@
     onCreate,
     onRename,
     onDelete,
-    onReorder,
+
     onMovePreset,
     onEmojiChange
   } = $props<{
@@ -27,12 +27,11 @@
     onCreate?: (value: { name: string; emoji: string | null }) => void;
     onRename?: (value: { oldName: string; newName: string }) => void;
     onDelete?: (name: string) => void;
-    onReorder?: (order: string[]) => void;
     onMovePreset?: (value: { oldGroup: string; newGroup: string; name: string }) => void;
     onEmojiChange?: (value: { groupName: string; emoji: string | null }) => void;
   }>();
 
-  const GROUP_CONTAINER = 'sidebar-groups';
+
 
   let creating = $state(false);
   let newGroupName = $state('');
@@ -103,24 +102,7 @@
     emojiPickerGroupName = null;
   }
 
-  // ── Group reorder drop ─────────────────────────────────────────────────────
 
-  function handleGroupDrop(state: DragDropState<PresetGroup>) {
-    const { draggedItem, targetContainer } = state;
-    if (!targetContainer || targetContainer !== GROUP_CONTAINER) return;
-
-    const targetGroupName = state.targetElement?.closest('[data-group-name]')?.getAttribute('data-group-name');
-    if (!targetGroupName || targetGroupName === draggedItem.name) return;
-
-    const nextOrder = groups.map((g: PresetGroup) => g.name);
-    const sourceIndex = nextOrder.indexOf(draggedItem.name);
-    const targetIndex = nextOrder.indexOf(targetGroupName);
-    if (sourceIndex < 0 || targetIndex < 0) return;
-
-    nextOrder.splice(sourceIndex, 1);
-    nextOrder.splice(targetIndex, 0, draggedItem.name);
-    onReorder?.(nextOrder);
-  }
 
   // ── Preset drop onto group card ───────────────────────────────────────────
   // Each group card is a droppable zone with container ID = `drop-group-<name>`.
@@ -193,29 +175,19 @@
     {/if}
 
     {#each visibleGroups as group (group.name)}
-      <!--
-        Each group card:
-        - draggable (for group reordering) via the grip handle only
-        - droppable (for preset cross-group move) via its own unique container ID
-      -->
+      <!-- Each group card is a droppable zone for preset cross-group move -->
       <div
         data-group-name={group.name}
-        use:draggable={{
-          container: GROUP_CONTAINER,
-          dragData: group,
-          handle: '.group-drag-handle',
-          attributes: { draggingClass: 'opacity-30 grayscale' }
-        }}
         use:droppable={{
           container: `drop-group-${group.name}`,
           callbacks: {
             onDrop: (state: DragDropState<PresetItem>) => handlePresetDropOnGroup(group.name, state)
           },
-          attributes: { dragOverClass: 'border-accent bg-accent/10 shadow-[inset_3px_0_0_0_var(--color-accent)]' }
+          attributes: { dragOverClass: 'drag-over-card' }
         }}
         role="listitem"
         class={cn(
-          'mb-2 rounded-[10px] border p-2 transition-colors duration-150',
+          'drop-zone-indicator mb-2 rounded-[10px] border p-2 transition-all duration-200',
           selectedGroupName === group.name
             ? 'border-accent/60 bg-surface-2'
             : 'border-border bg-surface-2 hover:bg-surface-3'
@@ -235,13 +207,6 @@
           </div>
         {:else}
           <div class="flex items-center gap-2">
-            <!-- Grip handle: only this initiates a GROUP drag -->
-            <div
-              class="group-drag-handle shrink-0 cursor-grab touch-none text-muted/40 hover:text-muted active:cursor-grabbing"
-              aria-label="Drag to reorder group"
-            >
-              <GripVertical size={14} />
-            </div>
 
             <Button
               size="icon"
@@ -277,7 +242,7 @@
               <Button
                 size="icon"
                 variant="ghost"
-                class="text-danger hover:bg-danger-soft hover:text-danger"
+                class="text-danger hover:bg-danger-soft hover:text-danger hover:shadow-[0_0_12px_rgba(239,68,68,0.35)] transition-shadow duration-200"
                 onclick={() => onDelete?.(group.name)}
               >
                 <Trash2 size={14} />
