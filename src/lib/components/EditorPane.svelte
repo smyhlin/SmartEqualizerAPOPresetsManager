@@ -14,8 +14,6 @@
     presetFilePath = null,
     draft = "",
     dirty = false,
-    configPath = "",
-    configTargetLabel = "",
     onSave,
     onApply,
     onExport,
@@ -26,8 +24,6 @@
     presetFilePath?: string | null;
     draft?: string;
     dirty?: boolean;
-    configPath?: string;
-    configTargetLabel?: string;
     onSave?: () => void;
     onApply?: () => void;
     onExport?: () => void;
@@ -84,28 +80,7 @@
 
 
 
-  <!-- Live System Status Bar -->
-  <div class="border-b border-border bg-background/30 px-6 py-2.5">
-    <div class="flex flex-wrap items-center gap-3 text-[10px] font-bold uppercase tracking-[0.12em] text-muted/60">
-      <div class="flex items-center gap-2 text-accent">
-        <div class="h-1.5 w-1.5 rounded-full bg-accent shadow-[0_0_8px_rgba(163,230,53,0.4)]"></div>
-        Live Output
-      </div>
-      <span class="inline-flex items-center rounded-full bg-surface-3 px-2 py-1 text-[9px] text-foreground/75">
-        {configTargetLabel}
-      </span>
-      <div class="h-4 w-px bg-border/60"></div>
-      <button 
-        type="button"
-        onclick={() => navigator.clipboard.writeText(configPath)}
-        class="min-w-0 flex-1 truncate font-mono text-[11px] normal-case tracking-normal text-foreground/70 transition-colors hover:text-accent hover:underline cursor-pointer text-left"
-        title="Click to copy path"
-      >
-        {configPath}
-      </button>
-    </div>
 
-  </div>
 
   <!-- Code Preview Pane -->
   <div class="flex min-h-0 flex-1 bg-surface-2/20 p-5">
@@ -120,12 +95,7 @@
           </div>
           <span class="ml-2 text-[10px] font-bold uppercase tracking-widest text-white/30">Preview</span>
         </div>
-        
-        {#if groupName && presetName}
-          <div class={`flex items-center gap-1.5 rounded-md px-2 py-0.5 text-[9px] font-bold uppercase tracking-widest ring-1 ring-inset ${dirty ? 'bg-warning/10 text-warning ring-warning/30' : 'bg-success/10 text-success ring-success/30'}`}>
-            {dirty ? 'Modified' : 'Saved'}
-          </div>
-        {/if}
+
       </div>
 
       <!-- Preview Content -->

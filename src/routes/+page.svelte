@@ -423,31 +423,6 @@
     configEditorOpen = false;
   }
 
-  function configTargetKind(snapshot: PresetLibrary | null = library) {
-    if (!snapshot) {
-      return 'loading';
-    }
-    if (snapshot.installedConfigPath && snapshot.configPath === snapshot.installedConfigPath) {
-      return 'installed';
-    }
-    if (snapshot.configPath === snapshot.defaultConfigPath) {
-      return 'appdata';
-    }
-    return 'custom';
-  }
-
-  function configTargetLabel(snapshot: PresetLibrary | null = library) {
-    switch (configTargetKind(snapshot)) {
-      case 'installed':
-        return 'Installed APO config';
-      case 'appdata':
-        return 'Managed AppData config';
-      case 'custom':
-        return 'Custom config path';
-      default:
-        return 'Detecting config path';
-    }
-  }
 
 </script>
 
@@ -502,56 +477,6 @@
         </div>
       </div>
 
-      <div class="mt-4 grid gap-3 lg:grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)_minmax(0,1fr)]">
-        <div class="shell-surface-2 p-3">
-          <div class="flex items-center justify-between gap-3">
-            <div>
-              <div class="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted">
-                Live APO Target
-              </div>
-              <div class="mt-1 text-sm font-medium text-foreground">{configTargetLabel()}</div>
-            </div>
-            <span
-              class={`inline-flex items-center rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] ${
-                configTargetKind() === 'installed'
-                  ? 'bg-success-soft text-success'
-                  : configTargetKind() === 'appdata'
-                    ? 'bg-accent-soft text-accent'
-                    : 'bg-warning-soft text-warning'
-              }`}
-            >
-              {configTargetKind() === 'installed'
-                ? 'Installed'
-                : configTargetKind() === 'appdata'
-                  ? 'AppData'
-                  : configTargetKind() === 'custom'
-                    ? 'Custom'
-                    : 'Loading'}
-            </span>
-          </div>
-          <div class="mt-3 rounded-[10px] border border-border bg-background/65 px-3 py-2 font-mono text-[12px] text-foreground">
-            {library?.configPath ?? 'Loading...'}
-          </div>
-        </div>
-
-        <div class="shell-surface-2 p-3">
-          <div class="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted">
-            Installed APO Config
-          </div>
-          <div class="mt-3 rounded-[10px] border border-border bg-background/65 px-3 py-2 font-mono text-[12px] text-foreground">
-            {library?.installedConfigPath ?? 'Install path not detected'}
-          </div>
-        </div>
-
-        <div class="shell-surface-2 p-3">
-          <div class="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted">
-            Managed AppData Config
-          </div>
-          <div class="mt-3 rounded-[10px] border border-border bg-background/65 px-3 py-2 font-mono text-[12px] text-foreground">
-            {library?.defaultConfigPath ?? '%APPDATA%\\SmartEqualizerAPO\\config'}
-          </div>
-        </div>
-      </div>
     </header>
 
     <main class="grid min-h-0 flex-1 gap-4 overflow-y-auto xl:grid-cols-[300px_minmax(340px,1fr)_460px]">
@@ -590,8 +515,6 @@
         presetName={selectedPresetName}
         {draft}
         {dirty}
-        configPath={library?.configPath ?? 'Loading...'}
-        configTargetLabel={configTargetLabel()}
         onSave={handleSave}
         onApply={handleApply}
         onExport={handleExport}
@@ -611,7 +534,6 @@
           : null
       }
       configPath={library?.configPath ?? 'Loading...'}
-      configTargetLabel={configTargetLabel()}
       onDraftChange={(value: string) => {
         draft = value;
         dirty = currentPreset()?.content !== draft;
