@@ -1,8 +1,6 @@
 <script lang="ts">
   import {
-    AlertTriangle,
     Download,
-    HardDriveDownload,
     Pencil,
     Save,
     WandSparkles,
@@ -17,13 +15,11 @@
     draft = "",
     dirty = false,
     configPath = "",
-    defaultConfigPath = "",
-    needsConfigMigration = false,
+    configTargetLabel = "",
     onSave,
     onApply,
     onExport,
     onEditConfig,
-    onSwitchConfigPath,
   } = $props<{
     groupName?: string | null;
     presetName?: string | null;
@@ -31,13 +27,11 @@
     draft?: string;
     dirty?: boolean;
     configPath?: string;
-    defaultConfigPath?: string;
-    needsConfigMigration?: boolean;
+    configTargetLabel?: string;
     onSave?: () => void;
     onApply?: () => void;
     onExport?: () => void;
     onEditConfig?: () => void;
-    onSwitchConfigPath?: (value: { path: string }) => void;
   }>();
 </script>
 
@@ -47,8 +41,8 @@
       
       <!-- Top Row: Status & Actions -->
       <div class="flex items-center justify-between gap-4">
-        <!-- Status -->
-        <div class={`flex h-5 items-center justify-center gap-1.5 rounded-full px-2.5 text-[9px] font-black uppercase tracking-wider ring-1 ring-inset transition-all duration-300 ${dirty ? 'bg-yellow-500/10 text-yellow-500 ring-yellow-500/30' : 'bg-green-500/10 text-green-500 ring-green-500/30'}`}>
+      <!-- Status -->
+      <div class={`flex h-5 items-center justify-center gap-1.5 rounded-full px-2.5 text-[9px] font-black uppercase tracking-wider ring-1 ring-inset transition-all duration-300 ${dirty ? 'bg-yellow-500/10 text-yellow-500 ring-yellow-500/30' : 'bg-green-500/10 text-green-500 ring-green-500/30'}`}>
           <div class={`h-1.5 w-1.5 rounded-full shadow-[0_0_8px_rgba(0,0,0,0.2)] ${dirty ? 'animate-pulse bg-yellow-400' : 'bg-green-400'}`}></div>
           {dirty ? 'Unsaved' : 'Synced'}
         </div>
@@ -88,48 +82,18 @@
     </div>
   </div>
 
-  {#if needsConfigMigration}
-    <div class="border-b border-border bg-surface-2 px-3 py-3 text-sm">
-      <div class="flex items-start gap-3">
-        <div
-          class="mt-0.5 inline-flex size-8 shrink-0 items-center justify-center rounded-[8px] border border-warning/30 bg-warning-soft text-warning"
-        >
-          <AlertTriangle size={15} />
-        </div>
-        <div class="min-w-0 flex-1">
-          <div class="font-medium text-foreground">
-            Equalizer APO is using a protected config path.
-          </div>
-          <div class="mt-1 text-sm text-muted">
-            Switch ConfigPath to the writable app folder before applying
-            presets.
-          </div>
-          <div class="mt-2 flex items-center gap-2">
-            <div
-              class="min-w-0 flex-1 truncate rounded-[8px] border border-border bg-background px-3 py-2 font-mono text-[12px] text-foreground"
-            >
-              {configPath}
-            </div>
-            <Button
-              variant="outline"
-              onclick={() => onSwitchConfigPath?.({ path: defaultConfigPath })}
-            >
-              <HardDriveDownload size={14} />
-              Use AppData
-            </Button>
-          </div>
-        </div>
-      </div>
-    </div>
-  {/if}
+
 
   <!-- Live System Status Bar -->
   <div class="border-b border-border bg-background/30 px-6 py-2.5">
-    <div class="flex items-center gap-4 text-[10px] font-bold uppercase tracking-[0.12em] text-muted/60">
+    <div class="flex flex-wrap items-center gap-3 text-[10px] font-bold uppercase tracking-[0.12em] text-muted/60">
       <div class="flex items-center gap-2 text-accent">
         <div class="h-1.5 w-1.5 rounded-full bg-accent shadow-[0_0_8px_rgba(163,230,53,0.4)]"></div>
         Live Output
       </div>
+      <span class="inline-flex items-center rounded-full bg-surface-3 px-2 py-1 text-[9px] text-foreground/75">
+        {configTargetLabel}
+      </span>
       <div class="h-4 w-px bg-border/60"></div>
       <button 
         type="button"
@@ -140,6 +104,7 @@
         {configPath}
       </button>
     </div>
+
   </div>
 
   <!-- Code Preview Pane -->

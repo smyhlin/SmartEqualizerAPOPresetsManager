@@ -5,6 +5,7 @@ use std::{
     path::{Path, PathBuf},
     process::Command,
     sync::{Mutex, MutexGuard},
+    time::{SystemTime, UNIX_EPOCH},
 };
 
 use serde::{Deserialize, Serialize};
@@ -19,6 +20,11 @@ pub const APP_FOLDER_NAME: &str = "SmartEqualizerAPO";
 pub const EVENT_PRESETS_UPDATED: &str = "smart-equalizer://presets-updated";
 pub const REGISTRY_KEY_PATH: &str = r"SOFTWARE\EqualizerAPO";
 pub const REGISTRY_VALUE_NAME: &str = "ConfigPath";
+pub const REGISTRY_INSTALL_PATH_VALUE_NAME: &str = "InstallPath";
+const MANAGED_CONFIG_DIR_NAME: &str = "SmartEqualizerAPO";
+const MANAGED_ACTIVE_PRESET_FILE_NAME: &str = "active-preset.txt";
+const MANAGED_BLOCK_START: &str = "# >>> SmartEqualizerAPOPresetsManager >>>";
+const MANAGED_BLOCK_END: &str = "# <<< SmartEqualizerAPOPresetsManager <<<";
 
 #[derive(Debug, Error)]
 pub enum AppError {
@@ -42,7 +48,7 @@ pub enum AppError {
     UnknownMenuItem(String),
     #[error("The Equalizer APO config path registry entry is missing.")]
     RegistryValueMissing,
-    #[error("Failed to start the elevated helper to update the Equalizer APO config path.")]
+    #[error("Administrator privileges are required to update the Equalizer APO config path. Please accept the UAC prompt, or run the application as administrator.")]
     ElevationDeclined,
     #[error("{0}")]
     Message(String),
@@ -69,6 +75,8 @@ pub struct PresetLibrary {
     pub app_data_dir: String,
     pub config_path: String,
     pub default_config_path: String,
+    #[serde(default)]
+    pub installed_config_path: Option<String>,
     pub groups: Vec<PresetGroup>,
     pub needs_config_migration: bool,
     pub config_path_prompted: bool,
@@ -135,6 +143,7 @@ pub struct AppStateInner {
     metadata_path: PathBuf,
     default_config_path: PathBuf,
     current_config_path: PathBuf,
+    detected_install_config_path: Option<PathBuf>,
     metadata: PresetsMetadata,
     tray_menu_targets: Vec<(String, TraySelection)>,
 }
@@ -147,12 +156,16 @@ impl AppState {
         let presets_dir = app_data_dir.join("presets");
         let metadata_path = app_data_dir.join("presets.json");
         let default_config_path = app_data_dir.join("config");
+        let detected_install_config_path = detect_installed_config_path();
 
         fs::create_dir_all(&presets_dir)?;
         fs::create_dir_all(&default_config_path)?;
 
         let metadata = load_metadata(&metadata_path)?;
-        let current_config_path = read_registry_config_path().unwrap_or_else(|_| default_config_path.clone());
+        let current_config_path = read_registry_config_path()
+            .ok()
+            .or_else(|| detected_install_config_path.clone())
+            .unwrap_or_else(|| default_config_path.clone());
 
         let mut inner = AppStateInner {
             app_data_dir,
@@ -160,6 +173,7 @@ impl AppState {
             metadata_path,
             default_config_path,
             current_config_path,
+            detected_install_config_path,
             metadata,
             tray_menu_targets: Vec::new(),
         };
@@ -225,6 +239,10 @@ impl AppStateInner {
             app_data_dir: path_to_string(&self.app_data_dir),
             config_path: path_to_string(&self.current_config_path),
             default_config_path: path_to_string(&self.default_config_path),
+            installed_config_path: self
+                .detected_install_config_path
+                .as_ref()
+                .map(|path| path_to_string(path)),
             groups,
             needs_config_migration: !self.is_config_path_writable()?,
             config_path_prompted: self.metadata.config_path_prompted,
@@ -263,20 +281,36 @@ impl AppStateInner {
     }
 
     pub fn set_config_path(&mut self, new_path: PathBuf) -> Result<(), AppError> {
-        ensure_directory(&new_path)?;
+        // Validate and normalize the path before proceeding
+        let normalized_path = validate_and_normalize_path(&new_path)?;
 
-        match write_registry_config_path(&new_path) {
+        ensure_directory(&normalized_path)?;
+
+        match write_registry_config_path(&normalized_path) {
             Ok(()) => {}
             Err(error)
                 if error.kind() == std::io::ErrorKind::PermissionDenied
                     || error.kind() == std::io::ErrorKind::Other =>
             {
-                run_elevated_registry_helper(&new_path)?;
+                run_elevated_registry_helper(&normalized_path)?;
             }
             Err(error) => return Err(error.into()),
         }
 
-        self.current_config_path = new_path;
+        // Re-read registry and normalize both paths for comparison
+        let actual_config_path = normalize_path(&read_registry_config_path()?);
+        let expected_path = normalize_path(&normalized_path);
+        
+        if actual_config_path != expected_path {
+            self.current_config_path = actual_config_path.clone();
+            return Err(AppError::Message(format!(
+                "Equalizer APO ConfigPath was updated to '{}', but the requested path was '{}'. This may indicate another process modified the registry.",
+                path_to_string(&actual_config_path),
+                path_to_string(&normalized_path),
+            )));
+        }
+
+        self.current_config_path = actual_config_path;
         self.write_active_config()
     }
 
@@ -806,25 +840,21 @@ impl AppStateInner {
     }
 
     fn write_active_config(&mut self) -> Result<(), AppError> {
-        ensure_directory(&self.current_config_path)?;
-        let payload = if let Some((group_name, preset_name)) = self.active_selection() {
-            let active_path = self.preset_path(group_name.as_str(), preset_name.as_str());
-            if active_path.exists() {
-                let include_path = self.include_path_for_preset(&active_path);
-                format!(
-                    "# SmartEqualizerAPOPresetsManager\r\n# Active preset: {} / {}\r\nInclude: {}\r\n",
-                    group_name,
-                    preset_name,
-                    include_path
-                )
-            } else {
-                "# SmartEqualizerAPOPresetsManager\r\n# No active preset selected.\r\n".to_string()
-            }
-        } else {
-            "# SmartEqualizerAPOPresetsManager\r\n# No active preset selected.\r\n".to_string()
-        };
+        let config_txt_path = self.current_config_path.join("config.txt");
+        let managed_preset_path = self.managed_live_preset_path();
+        let managed_preset_payload = self.build_managed_preset_payload()?;
+        let existing_config = fs::read_to_string(&config_txt_path).unwrap_or_default();
+        let updated_config = build_config_with_managed_include(
+            existing_config.as_str(),
+            self.managed_include_path().as_str(),
+        );
 
-        write_text_file_atomically(&self.current_config_path.join("config.txt"), payload.as_str())
+        self.write_live_config_files(
+            &config_txt_path,
+            updated_config.as_str(),
+            &managed_preset_path,
+            managed_preset_payload.as_str(),
+        )
     }
 
     fn is_config_path_writable(&self) -> Result<bool, AppError> {
@@ -900,27 +930,120 @@ impl AppStateInner {
 
         path_to_string(preset_path)
     }
+
+    fn managed_live_directory(&self) -> PathBuf {
+        self.current_config_path.join(MANAGED_CONFIG_DIR_NAME)
+    }
+
+    fn managed_live_preset_path(&self) -> PathBuf {
+        self.managed_live_directory()
+            .join(MANAGED_ACTIVE_PRESET_FILE_NAME)
+    }
+
+    fn managed_include_path(&self) -> String {
+        let managed_path = self.managed_live_preset_path();
+        self.include_path_for_preset(&managed_path)
+    }
+
+    fn build_managed_preset_payload(&self) -> Result<String, AppError> {
+        let payload = if let Some((group_name, preset_name)) = self.active_selection() {
+            let active_path = self.preset_path(group_name.as_str(), preset_name.as_str());
+            if active_path.exists() {
+                let preset_content = fs::read_to_string(active_path)?;
+                format!(
+                    "# Generated by SmartEqualizerAPOPresetsManager\r\n# Active preset: {} / {}\r\n\r\n{}",
+                    group_name,
+                    preset_name,
+                    normalize_windows_newlines(preset_content.as_str()),
+                )
+            } else {
+                "# Generated by SmartEqualizerAPOPresetsManager\r\n# No active preset selected.\r\n"
+                    .to_string()
+            }
+        } else {
+            "# Generated by SmartEqualizerAPOPresetsManager\r\n# No active preset selected.\r\n"
+                .to_string()
+        };
+
+        Ok(ensure_trailing_newline(payload.as_str()))
+    }
+
+    fn write_live_config_files(
+        &self,
+        config_txt_path: &Path,
+        config_txt_content: &str,
+        managed_preset_path: &Path,
+        managed_preset_content: &str,
+    ) -> Result<(), AppError> {
+        match write_live_config_files_direct(
+            config_txt_path,
+            config_txt_content,
+            managed_preset_path,
+            managed_preset_content,
+        ) {
+            Ok(()) => Ok(()),
+            Err(AppError::Io(error)) if error.kind() == std::io::ErrorKind::PermissionDenied => {
+                run_elevated_live_config_helper(
+                    &self.app_data_dir,
+                    config_txt_path,
+                    config_txt_content,
+                    managed_preset_path,
+                    managed_preset_content,
+                )
+            }
+            Err(error) => Err(error),
+        }
+    }
 }
 
 pub fn try_handle_cli_mode() -> Option<i32> {
     let mut args = env::args().skip(1);
     let command = args.next()?;
-    if command != "--elevated-set-config-path" {
-        return None;
-    }
+    match command.as_str() {
+        "--elevated-set-config-path" => {
+            let Some(path) = args.next() else {
+                return Some(1);
+            };
 
-    let Some(path) = args.next() else {
-        return Some(1);
-    };
-
-    let exit_code = match write_registry_config_path(Path::new(&path)) {
-        Ok(()) => 0,
-        Err(error) => {
-            eprintln!("{error}");
-            1
+            let exit_code = match write_registry_config_path(Path::new(&path)) {
+                Ok(()) => 0,
+                Err(error) => {
+                    eprintln!("{error}");
+                    1
+                }
+            };
+            Some(exit_code)
         }
-    };
-    Some(exit_code)
+        "--elevated-write-live-config" => {
+            let Some(staged_config_path) = args.next() else {
+                return Some(1);
+            };
+            let Some(config_txt_path) = args.next() else {
+                return Some(1);
+            };
+            let Some(staged_preset_path) = args.next() else {
+                return Some(1);
+            };
+            let Some(managed_preset_path) = args.next() else {
+                return Some(1);
+            };
+
+            let exit_code = match write_elevated_live_config(
+                Path::new(&staged_config_path),
+                Path::new(&config_txt_path),
+                Path::new(&staged_preset_path),
+                Path::new(&managed_preset_path),
+            ) {
+                Ok(()) => 0,
+                Err(error) => {
+                    eprintln!("{error}");
+                    1
+                }
+            };
+            Some(exit_code)
+        }
+        _ => None,
+    }
 }
 
 fn load_metadata(metadata_path: &Path) -> Result<PresetsMetadata, AppError> {
@@ -941,6 +1064,16 @@ fn read_registry_config_path() -> Result<PathBuf, AppError> {
     Ok(PathBuf::from(value))
 }
 
+fn detect_installed_config_path() -> Option<PathBuf> {
+    let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
+    let key = hklm
+        .open_subkey_with_flags(REGISTRY_KEY_PATH, KEY_READ | KEY_WOW64_64KEY)
+        .ok()?;
+    let install_path: String = key.get_value(REGISTRY_INSTALL_PATH_VALUE_NAME).ok()?;
+    let config_path = PathBuf::from(install_path).join("config");
+    config_path.exists().then_some(config_path)
+}
+
 fn write_registry_config_path(path: &Path) -> Result<(), std::io::Error> {
     let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
     let key = hklm.open_subkey_with_flags(REGISTRY_KEY_PATH, KEY_SET_VALUE | KEY_WOW64_64KEY)?;
@@ -949,29 +1082,101 @@ fn write_registry_config_path(path: &Path) -> Result<(), std::io::Error> {
 }
 
 fn run_elevated_registry_helper(path: &Path) -> Result<(), AppError> {
+    run_elevated_cli(&[
+        "--elevated-set-config-path".to_string(),
+        path_to_string(path),
+    ])
+}
+
+fn run_elevated_live_config_helper(
+    app_data_dir: &Path,
+    config_txt_path: &Path,
+    config_txt_content: &str,
+    managed_preset_path: &Path,
+    managed_preset_content: &str,
+) -> Result<(), AppError> {
+    let token = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let staged_config_path = app_data_dir.join(format!("live-config-{token}.txt"));
+    let staged_preset_path = app_data_dir.join(format!("live-preset-{token}.txt"));
+
+    write_text_file_atomically(&staged_config_path, config_txt_content)?;
+    write_text_file_atomically(&staged_preset_path, managed_preset_content)?;
+
+    let result = run_elevated_cli(&[
+        "--elevated-write-live-config".to_string(),
+        path_to_string(&staged_config_path),
+        path_to_string(config_txt_path),
+        path_to_string(&staged_preset_path),
+        path_to_string(managed_preset_path),
+    ]);
+
+    let _ = fs::remove_file(staged_config_path);
+    let _ = fs::remove_file(staged_preset_path);
+    result
+}
+
+fn run_elevated_cli(arguments: &[String]) -> Result<(), AppError> {
     let current_exe = env::current_exe()?;
+    let escaped_arguments = arguments
+        .iter()
+        .map(|value| format!("'\"{}\"'", escape_for_powershell(value)))
+        .collect::<Vec<_>>()
+        .join(", ");
     let command = format!(
-        "$process = Start-Process -FilePath '{}' -ArgumentList @('--elevated-set-config-path','{}') -Verb RunAs -Wait -PassThru; exit $process.ExitCode",
+        "$process = Start-Process -FilePath '{}' -ArgumentList @({}) -Verb RunAs -Wait -PassThru; exit $process.ExitCode",
         escape_for_powershell(current_exe.as_os_str().to_string_lossy().as_ref()),
-        escape_for_powershell(path_to_string(path).as_str())
+        escaped_arguments,
     );
 
-    let status = Command::new("powershell")
-        .args([
-            "-NoProfile",
-            "-NonInteractive",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-Command",
-            command.as_str(),
-        ])
-        .status()?;
+    // Try PowerShell 7+ first (pwsh.exe), then fall back to Windows PowerShell (powershell.exe)
+    let shells = ["pwsh.exe", "powershell.exe"];
+    let mut last_error: Option<std::io::Error> = None;
 
-    if status.success() {
-        Ok(())
-    } else {
-        Err(AppError::ElevationDeclined)
+    for shell in shells {
+        let result = Command::new(shell)
+            .args([
+                "-NoProfile",
+                "-NonInteractive",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-Command",
+                command.as_str(),
+            ])
+            .status();
+
+        match result {
+            Ok(status) if status.success() => return Ok(()),
+            Ok(_status) => {
+                return Err(AppError::ElevationDeclined);
+            }
+            Err(error) => {
+                last_error = Some(error);
+                // Continue to next shell
+            }
+        }
     }
+
+    // If we get here, both shells failed
+    Err(last_error.map_or(AppError::ElevationDeclined, |e| e.into()))
+}
+
+fn write_elevated_live_config(
+    staged_config_path: &Path,
+    config_txt_path: &Path,
+    staged_preset_path: &Path,
+    managed_preset_path: &Path,
+) -> Result<(), AppError> {
+    let config_content = fs::read_to_string(staged_config_path)?;
+    let preset_content = fs::read_to_string(staged_preset_path)?;
+    write_live_config_files_direct(
+        config_txt_path,
+        config_content.as_str(),
+        managed_preset_path,
+        preset_content.as_str(),
+    )
 }
 
 fn list_group_names(presets_dir: &Path) -> Result<Vec<String>, AppError> {
@@ -1053,6 +1258,60 @@ fn ensure_directory(path: &Path) -> Result<(), AppError> {
     Ok(())
 }
 
+/// Validates and normalizes a config path to prevent issues
+fn validate_and_normalize_path(path: &Path) -> Result<PathBuf, AppError> {
+    // Must be an absolute path
+    if !path.is_absolute() {
+        return Err(AppError::Message(
+            "Config path must be an absolute path (e.g., C:\\folder\\config)".to_string(),
+        ));
+    }
+
+    // Must have a valid extension or be a directory path
+    let normalized = normalize_path(path);
+    
+    // Check that path doesn't contain invalid characters for Windows
+    let path_str = path_to_string(&normalized);
+    if path_str.contains('<') || path_str.contains('>') || path_str.contains('|') 
+        || path_str.contains('?') || path_str.contains('*') {
+        return Err(AppError::Message(
+            "Config path contains invalid characters".to_string(),
+        ));
+    }
+
+    Ok(normalized)
+}
+
+/// Normalizes a path by removing trailing separators and standardizing format
+fn normalize_path(path: &Path) -> PathBuf {
+    // Convert to string and clean up
+    let mut path_str = path.to_string_lossy().to_string();
+    
+    // Remove trailing slashes/backslashes
+    while path_str.ends_with('\\') || path_str.ends_with('/') {
+        path_str.pop();
+    }
+    
+    PathBuf::from(path_str)
+}
+
+fn write_live_config_files_direct(
+    config_txt_path: &Path,
+    config_txt_content: &str,
+    managed_preset_path: &Path,
+    managed_preset_content: &str,
+) -> Result<(), AppError> {
+    if let Some(parent) = config_txt_path.parent() {
+        ensure_directory(parent)?;
+    }
+    if let Some(parent) = managed_preset_path.parent() {
+        ensure_directory(parent)?;
+    }
+
+    write_text_file_atomically(config_txt_path, config_txt_content)?;
+    write_text_file_atomically(managed_preset_path, managed_preset_content)
+}
+
 fn is_directory_writable(path: &Path) -> Result<bool, AppError> {
     if let Err(error) = fs::create_dir_all(path) {
         return if error.kind() == std::io::ErrorKind::PermissionDenied {
@@ -1096,6 +1355,59 @@ fn write_text_file_atomically(path: &Path, content: &str) -> Result<(), AppError
 
 fn path_to_string(path: &Path) -> String {
     path.to_string_lossy().to_string()
+}
+
+fn build_config_with_managed_include(existing_config: &str, include_path: &str) -> String {
+    let managed_block = format!(
+        "{MANAGED_BLOCK_START}\r\nInclude: {}\r\n{MANAGED_BLOCK_END}",
+        include_path
+    );
+    let normalized_existing = normalize_windows_newlines(existing_config);
+    let normalized_block = normalize_windows_newlines(managed_block.as_str());
+
+    if let Some(updated) = replace_existing_managed_block(
+        normalized_existing.as_str(),
+        normalized_block.as_str(),
+    ) {
+        return ensure_trailing_newline(updated.as_str());
+    }
+
+    if is_legacy_managed_config(normalized_existing.as_str()) {
+        return ensure_trailing_newline(normalized_block.as_str());
+    }
+
+    // Replace the entire config.txt with just the managed block.
+    // This prevents default APO EQ settings from stacking with the preset.
+    ensure_trailing_newline(normalized_block.as_str())
+}
+
+fn replace_existing_managed_block(existing_config: &str, managed_block: &str) -> Option<String> {
+    // Only check if the managed block markers exist. If they do, replace the
+    // entire config with just the managed block (no surrounding content preserved).
+    if existing_config.find(MANAGED_BLOCK_START).is_some() {
+        Some(managed_block.to_string())
+    } else {
+        None
+    }
+}
+
+fn is_legacy_managed_config(existing_config: &str) -> bool {
+    let trimmed = existing_config.trim();
+    trimmed.starts_with("# SmartEqualizerAPOPresetsManager")
+        && (trimmed.contains("# Active preset:") || trimmed.contains("# No active preset selected."))
+}
+
+fn normalize_windows_newlines(value: &str) -> String {
+    value.replace("\r\n", "\n").replace('\r', "\n").replace('\n', "\r\n")
+}
+
+fn ensure_trailing_newline(value: &str) -> String {
+    let normalized = normalize_windows_newlines(value);
+    if normalized.ends_with("\r\n") {
+        normalized
+    } else {
+        format!("{normalized}\r\n")
+    }
 }
 
 fn relative_path(from_dir: &Path, target: &Path) -> Option<PathBuf> {

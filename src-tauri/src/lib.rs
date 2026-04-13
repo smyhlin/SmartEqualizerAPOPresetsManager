@@ -114,7 +114,7 @@ fn configure_main_window<R: Runtime>(app: &AppHandle<R>) -> Result<(), AppError>
 }
 
 fn maybe_prompt_for_config_migration<R: Runtime>(app: &AppHandle<R>) -> Result<(), AppError> {
-    let (should_prompt, default_path) = {
+    let (should_prompt_migration, default_path) = {
         let state: State<'_, AppState> = app.state();
         let guard = state.lock()?;
         (
@@ -123,7 +123,7 @@ fn maybe_prompt_for_config_migration<R: Runtime>(app: &AppHandle<R>) -> Result<(
         )
     };
 
-    if !should_prompt {
+    if !should_prompt_migration {
         return Ok(());
     }
 

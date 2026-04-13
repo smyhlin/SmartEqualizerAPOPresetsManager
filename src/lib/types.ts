@@ -16,6 +16,7 @@ export type PresetLibrary = {
   appDataDir: string;
   configPath: string;
   defaultConfigPath: string;
+  installedConfigPath: string | null;
   groups: PresetGroup[];
   needsConfigMigration: boolean;
   configPathPrompted: boolean;

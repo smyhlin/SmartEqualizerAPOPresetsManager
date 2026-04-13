@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { AlertTriangle, HardDriveDownload, Save, WandSparkles, X } from '@lucide/svelte';
+  import { Save, X } from '@lucide/svelte';
 
   import Button from '$lib/components/ui/button.svelte';
 
@@ -11,13 +11,10 @@
     draft = '',
     dirty = false,
     configPath = '',
-    defaultConfigPath = '',
-    needsConfigMigration = false,
+    configTargetLabel = '',
     onDraftChange,
     onSave,
-    onApply,
     onClose,
-    onSwitchConfigPath
   } = $props<{
     open?: boolean;
     groupName?: string | null;
@@ -26,13 +23,10 @@
     draft?: string;
     dirty?: boolean;
     configPath?: string;
-    defaultConfigPath?: string;
-    needsConfigMigration?: boolean;
+    configTargetLabel?: string;
     onDraftChange?: (value: string) => void;
     onSave?: () => void;
-    onApply?: () => void;
     onClose?: () => void;
-    onSwitchConfigPath?: (value: { path: string }) => void;
   }>();
 
   let localValue = $state('');
@@ -100,13 +94,9 @@
           </div>
 
           <div class="flex items-center gap-2">
-            <Button variant="secondary" onclick={() => onSave?.()}>
+            <Button variant="secondary" onclick={() => { onSave?.(); close(); }}>
               <Save size={14} />
               Save File
-            </Button>
-            <Button onclick={() => onApply?.()}>
-              <WandSparkles size={14} />
-              Apply
             </Button>
             <Button variant="ghost" size="icon" onclick={close} ariaLabel="Close editor">
               <X size={16} />
@@ -115,36 +105,16 @@
         </div>
       </div>
 
-      {#if needsConfigMigration}
-        <div class="border-b border-border bg-surface-2 px-4 py-3 text-sm">
-          <div class="flex items-start gap-3">
-            <div class="mt-0.5 inline-flex size-8 shrink-0 items-center justify-center rounded-[8px] border border-warning/30 bg-warning-soft text-warning">
-              <AlertTriangle size={15} />
-            </div>
-            <div class="min-w-0 flex-1">
-              <div class="font-medium text-foreground">Equalizer APO is using a protected config path.</div>
-              <div class="mt-1 text-sm text-muted">
-                Switch ConfigPath to the writable app folder before applying presets.
-              </div>
-              <div class="mt-2 flex items-center gap-2">
-                <div class="min-w-0 flex-1 truncate rounded-[8px] border border-border bg-background px-3 py-2 font-mono text-[12px] text-foreground">
-                  {configPath}
-                </div>
-                <Button
-                  variant="outline"
-                  onclick={() => onSwitchConfigPath?.({ path: defaultConfigPath })}
-                >
-                  <HardDriveDownload size={14} />
-                  Use AppData
-                </Button>
-              </div>
-            </div>
-          </div>
-        </div>
-      {/if}
+
 
       <div class="border-b border-border px-4 py-2 text-xs text-muted">
-        Writing active output to <span class="font-mono text-foreground">{configPath}</span>
+        <div class="flex flex-wrap items-center gap-2">
+          <span>Writing active output to</span>
+          <span class="rounded-full bg-surface-3 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-foreground/70">
+            {configTargetLabel}
+          </span>
+          <span class="font-mono text-foreground">{configPath}</span>
+        </div>
       </div>
 
       <div class="flex min-h-0 flex-1 p-4">
@@ -171,7 +141,7 @@
           Saved to preset storage
         {/if}
         <span class="mx-2 text-border">•</span>
-        Close keeps your draft in memory until you save or apply it
+        Close or save to commit your changes
       </div>
     </div>
   </div>
