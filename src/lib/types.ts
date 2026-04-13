@@ -1,7 +1,14 @@
+export type PresetConvolution = {
+  wavPath: string;
+  wavBase64?: string | null;
+  error?: string | null;
+};
+
 export type PresetItem = {
   name: string;
   order: number;
   content: string;
+  convolution?: PresetConvolution | null;
 };
 
 export type PresetGroup = {

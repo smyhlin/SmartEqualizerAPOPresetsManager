@@ -8,6 +8,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
+use base64::{engine::general_purpose::STANDARD, Engine as _};
 use serde::{Deserialize, Serialize};
 use tauri::Error as TauriError;
 use thiserror::Error;
@@ -98,6 +99,18 @@ pub struct PresetItem {
     pub name: String,
     pub order: usize,
     pub content: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub convolution: Option<PresetConvolution>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct PresetConvolution {
+    pub wav_path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wav_base64: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -217,10 +230,12 @@ impl AppStateInner {
                         }
 
                         let content = fs::read_to_string(preset_path).unwrap_or_default();
+                        let convolution = self.build_convolution_state(&content);
                         Some(PresetItem {
                             name: preset.name.clone(),
                             order: preset_index,
                             content,
+                            convolution,
                         })
                     })
                     .collect::<Vec<_>>();
@@ -247,6 +262,48 @@ impl AppStateInner {
             needs_config_migration: !self.is_config_path_writable()?,
             config_path_prompted: self.metadata.config_path_prompted,
         })
+    }
+
+    fn build_convolution_state(&self, content: &str) -> Option<PresetConvolution> {
+        let wav_path = extract_convolution_path(content)?;
+        let resolved_path = self.resolve_convolution_reference(Path::new(wav_path.as_str()));
+        let mut convolution = PresetConvolution {
+            wav_path,
+            wav_base64: None,
+            error: None,
+        };
+
+        if !resolved_path.exists() || !resolved_path.is_file() {
+            convolution.error = Some(format!(
+                "The file or folder does not exist: {}",
+                resolved_path.display()
+            ));
+            return Some(convolution);
+        }
+
+        match fs::read(&resolved_path) {
+            Ok(bytes) => {
+                convolution.wav_base64 = Some(STANDARD.encode(bytes));
+            }
+            Err(error) => {
+                convolution.error = Some(error.to_string());
+            }
+        }
+
+        Some(convolution)
+    }
+
+    fn resolve_convolution_reference(&self, wav_path: &Path) -> PathBuf {
+        if wav_path.is_absolute() {
+            wav_path.to_path_buf()
+        } else {
+            self.current_config_path.join(wav_path)
+        }
+    }
+
+    fn preset_convolution_path(&self, group_name: &str, preset_name: &str) -> PathBuf {
+        self.group_path(group_name)
+            .join(format!("{preset_name}.wav"))
     }
 
     pub fn get_config_path(&self) -> String {
@@ -494,10 +551,19 @@ impl AppStateInner {
             return Err(AppError::AlreadyExists(format!("{group_name}/{new_name}")));
         }
 
-        fs::rename(
-            self.preset_path(group_name, old_name),
-            self.preset_path(group_name, &new_name),
-        )?;
+        let old_preset_path = self.preset_path(group_name, old_name);
+        let new_preset_path = self.preset_path(group_name, &new_name);
+        let old_convolution_path = self.preset_convolution_path(group_name, old_name);
+        let new_convolution_path = self.preset_convolution_path(group_name, &new_name);
+        let existing_content = fs::read_to_string(&old_preset_path).unwrap_or_default();
+        let had_convolution_copy = old_convolution_path.exists();
+
+        fs::rename(&old_preset_path, &new_preset_path)?;
+        if had_convolution_copy {
+            fs::rename(&old_convolution_path, &new_convolution_path)?;
+            let updated_content = replace_convolution_path(&existing_content, &new_convolution_path);
+            write_text_file_atomically(&new_preset_path, updated_content.as_str())?;
+        }
 
         self.metadata.groups[group_index].presets[preset_index].name = new_name.clone();
         if self.metadata.groups[group_index].active_preset.as_deref() == Some(old_name) {
@@ -520,8 +586,12 @@ impl AppStateInner {
             })?;
 
         let preset_path = self.preset_path(group_name, preset_name);
+        let convolution_path = self.preset_convolution_path(group_name, preset_name);
         if preset_path.exists() {
             fs::remove_file(preset_path)?;
+        }
+        if convolution_path.exists() {
+            fs::remove_file(convolution_path)?;
         }
 
         self.metadata.groups[group_index].presets.remove(preset_index);
@@ -555,18 +625,28 @@ impl AppStateInner {
             })?;
 
         let preset_metadata = self.metadata.groups[old_group_index].presets.remove(preset_index);
+        let old_preset_path = self.preset_path(old_group_name, preset_name);
+        let new_preset_path = self.preset_path(new_group_name, preset_name);
+        let old_convolution_path = self.preset_convolution_path(old_group_name, preset_name);
+        let new_convolution_path = self.preset_convolution_path(new_group_name, preset_name);
+        let existing_content = fs::read_to_string(&old_preset_path).unwrap_or_default();
+        let had_convolution_copy = old_convolution_path.exists();
         let was_active = self.metadata.groups[old_group_index]
             .active_preset
             .as_deref()
             == Some(preset_name);
 
         if old_group_name != new_group_name {
-            let destination = self.preset_path(new_group_name, preset_name);
-            if destination.exists() {
+            if new_preset_path.exists() {
                 return Err(AppError::AlreadyExists(format!("{new_group_name}/{preset_name}")));
             }
 
-            fs::rename(self.preset_path(old_group_name, preset_name), destination)?;
+            fs::rename(&old_preset_path, &new_preset_path)?;
+            if had_convolution_copy {
+                fs::rename(&old_convolution_path, &new_convolution_path)?;
+                let updated_content = replace_convolution_path(&existing_content, &new_convolution_path);
+                write_text_file_atomically(&new_preset_path, updated_content.as_str())?;
+            }
             if was_active {
                 self.metadata.groups[old_group_index].active_preset = None;
                 self.metadata.groups[new_group_index].active_preset = Some(preset_name.to_string());
@@ -588,7 +668,8 @@ impl AppStateInner {
     }
 
     pub fn export_app_settings(&mut self, destination: &Path) -> Result<(), AppError> {
-        let snapshot = self.snapshot()?;
+        let mut snapshot = self.snapshot()?;
+        populate_backup_convolution_bytes(&mut snapshot, &self.current_config_path);
         let payload = serde_json::to_string_pretty(&snapshot)?;
         write_text_file_atomically(destination, payload.as_str())
     }
@@ -663,9 +744,36 @@ impl AppStateInner {
 
             for preset in &group.presets {
                 let preset_name = validate_name(&preset.name)?;
+                let preset_path = group_dir.join(format!("{preset_name}.txt"));
+                let convolution_path = self.preset_convolution_path(&group_name, &preset_name);
+                let mut content_to_write = preset.content.clone();
+
+                if let Some(convolution) = preset.convolution.as_ref() {
+                    let mut restored_bytes: Option<Vec<u8>> = None;
+                    if let Some(wav_base64) = convolution.wav_base64.as_ref() {
+                        restored_bytes = STANDARD.decode(wav_base64.as_bytes()).ok();
+                    }
+
+                    if restored_bytes.is_none() && !convolution.wav_path.trim().is_empty() {
+                        let imported_reference = resolve_import_convolution_reference(
+                            &imported.config_path,
+                            Path::new(convolution.wav_path.as_str()),
+                        );
+                        if imported_reference.exists() && imported_reference.is_file() {
+                            restored_bytes = fs::read(imported_reference).ok();
+                        }
+                    }
+
+                    if let Some(bytes) = restored_bytes {
+                        let staged_convolution_path = group_dir.join(format!("{preset_name}.wav"));
+                        write_binary_file_atomically(&staged_convolution_path, bytes.as_slice())?;
+                        content_to_write = replace_convolution_path(&content_to_write, &convolution_path);
+                    }
+                }
+
                 write_text_file_atomically(
-                    &group_dir.join(format!("{preset_name}.txt")),
-                    preset.content.as_str(),
+                    &preset_path,
+                    content_to_write.as_str(),
                 )?;
             }
         }
@@ -720,13 +828,26 @@ impl AppStateInner {
 
         for raw_path in paths {
             let file_path = PathBuf::from(raw_path);
-            let content = fs::read_to_string(&file_path)?;
             let base_name = file_path
                 .file_stem()
                 .and_then(|stem| stem.to_str())
                 .map(sanitize_import_name)
                 .unwrap_or_else(|| "Imported Preset".to_string());
             let unique_name = self.unique_preset_name(group_index, &base_name);
+            let content = match file_path
+                .extension()
+                .and_then(|extension| extension.to_str())
+                .map(|value| value.to_ascii_lowercase())
+                .as_deref()
+            {
+                Some("wav") => {
+                    let convolution_path = self.preset_convolution_path(group_name, &unique_name);
+                    let bytes = fs::read(&file_path)?;
+                    write_binary_file_atomically(&convolution_path, bytes.as_slice())?;
+                    build_convolution_preset_content(&convolution_path)
+                }
+                _ => fs::read_to_string(&file_path)?,
+            };
             write_text_file_atomically(
                 &self.preset_path(group_name, &unique_name),
                 content.as_str(),
@@ -741,6 +862,70 @@ impl AppStateInner {
 
         self.reindex_orders();
         self.persist_metadata()
+    }
+
+    pub fn attach_convolution_wav(
+        &mut self,
+        group_name: &str,
+        preset_name: &str,
+        content: &str,
+        source_path: &Path,
+    ) -> Result<(), AppError> {
+        let group_index = self
+            .group_index(group_name)
+            .ok_or_else(|| AppError::GroupNotFound(group_name.to_string()))?;
+        if self.preset_index(group_index, preset_name).is_none() {
+            return Err(AppError::PresetNotFound {
+                group: group_name.to_string(),
+                name: preset_name.to_string(),
+            });
+        }
+
+        let normalized_source = normalize_path(source_path);
+        if !normalized_source.exists() || !normalized_source.is_file() {
+            return Err(AppError::Message(format!(
+                "The file or folder does not exist: {}",
+                normalized_source.display()
+            )));
+        }
+
+        let convolution_path = self.preset_convolution_path(group_name, preset_name);
+        let source_matches_target = normalize_path(&convolution_path) == normalized_source;
+        if !source_matches_target {
+            let bytes = fs::read(&normalized_source)?;
+            write_binary_file_atomically(&convolution_path, bytes.as_slice())?;
+        }
+
+        let updated_content = replace_convolution_path(content, &convolution_path);
+        write_text_file_atomically(&self.preset_path(group_name, preset_name), updated_content.as_str())?;
+        self.persist_metadata()?;
+        self.write_active_config()
+    }
+
+    pub fn remove_convolution_wav(
+        &mut self,
+        group_name: &str,
+        preset_name: &str,
+        content: &str,
+    ) -> Result<(), AppError> {
+        let group_index = self
+            .group_index(group_name)
+            .ok_or_else(|| AppError::GroupNotFound(group_name.to_string()))?;
+        if self.preset_index(group_index, preset_name).is_none() {
+            return Err(AppError::PresetNotFound {
+                group: group_name.to_string(),
+                name: preset_name.to_string(),
+            });
+        }
+
+        let convolution_path = self.preset_convolution_path(group_name, preset_name);
+        let updated_content = remove_convolution_path(content);
+        if convolution_path.exists() {
+            fs::remove_file(convolution_path)?;
+        }
+        write_text_file_atomically(&self.preset_path(group_name, preset_name), updated_content.as_str())?;
+        self.persist_metadata()?;
+        self.write_active_config()
     }
 
     pub fn export_preset(
@@ -1251,6 +1436,162 @@ fn sanitize_import_name(name: &str) -> String {
     } else {
         cleaned
     }
+}
+
+fn format_convolution_path(path: &Path) -> String {
+    path_to_string(path).replace('"', "\\\"")
+}
+
+fn is_convolution_line(line: &str) -> bool {
+    let trimmed = line.trim_start();
+    let Some((key, _)) = trimmed.split_once(':') else {
+        return false;
+    };
+
+    key.trim().eq_ignore_ascii_case("Convolution")
+}
+
+fn extract_convolution_path(content: &str) -> Option<String> {
+    content.lines().find_map(|line| {
+        if !is_convolution_line(line) {
+            return None;
+        }
+
+        let (_, value) = line.trim_start().split_once(':')?;
+        let trimmed = strip_wrapping_quotes(value);
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed)
+        }
+    })
+}
+
+fn replace_convolution_path(content: &str, wav_path: &Path) -> String {
+    let normalized = normalize_windows_newlines(content);
+    let replacement = format!("Convolution: \"{}\"", format_convolution_path(wav_path));
+    let mut lines = Vec::new();
+    let mut replaced = false;
+
+    for line in normalized.split("\r\n") {
+        if !replaced && is_convolution_line(line) {
+            let indent_len = line.len().saturating_sub(line.trim_start().len());
+            let indent = &line[..indent_len];
+            lines.push(format!("{indent}{replacement}"));
+            replaced = true;
+        } else {
+            lines.push(line.to_string());
+        }
+    }
+
+    if !replaced {
+        let mut appended = normalized;
+        if !appended.is_empty() && !appended.ends_with("\r\n") {
+            appended.push_str("\r\n");
+        }
+        appended.push_str(&replacement);
+        appended.push_str("\r\n");
+        return appended;
+    }
+
+    let joined = lines.join("\r\n");
+    if joined.is_empty() {
+        joined
+    } else {
+        ensure_trailing_newline(joined.as_str())
+    }
+}
+
+fn remove_convolution_path(content: &str) -> String {
+    let normalized = normalize_windows_newlines(content);
+    let lines = normalized
+        .split("\r\n")
+        .filter(|line| !is_convolution_line(line))
+        .map(|line| line.to_string())
+        .collect::<Vec<_>>();
+    let joined = lines.join("\r\n");
+    if joined.is_empty() {
+        joined
+    } else {
+        ensure_trailing_newline(joined.as_str())
+    }
+}
+
+fn strip_wrapping_quotes(value: &str) -> String {
+    let trimmed = value.trim();
+
+    if (trimmed.starts_with('"') && trimmed.ends_with('"'))
+        || (trimmed.starts_with('\'') && trimmed.ends_with('\''))
+    {
+        trimmed[1..trimmed.len().saturating_sub(1)].trim().to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+fn build_convolution_preset_content(wav_path: &Path) -> String {
+    format!("Convolution: \"{}\"\r\n", format_convolution_path(wav_path))
+}
+
+fn populate_backup_convolution_bytes(snapshot: &mut PresetLibrary, current_config_path: &Path) {
+    for group in &mut snapshot.groups {
+        for preset in &mut group.presets {
+            let Some(convolution) = preset.convolution.as_mut() else {
+                continue;
+            };
+
+            if convolution.error.is_some() || convolution.wav_base64.is_some() {
+                continue;
+            }
+
+            if convolution.wav_path.trim().is_empty() {
+                continue;
+            }
+
+            let referenced_path = Path::new(convolution.wav_path.as_str());
+            let resolved_path = if referenced_path.is_absolute() {
+                referenced_path.to_path_buf()
+            } else {
+                current_config_path.join(referenced_path)
+            };
+
+            match fs::read(&resolved_path) {
+                Ok(bytes) => {
+                    convolution.wav_base64 = Some(STANDARD.encode(bytes));
+                }
+                Err(error) => {
+                    convolution.error = Some(error.to_string());
+                }
+            }
+        }
+    }
+}
+
+fn resolve_import_convolution_reference(config_path: &str, wav_path: &Path) -> PathBuf {
+    if wav_path.is_absolute() {
+        wav_path.to_path_buf()
+    } else {
+        PathBuf::from(config_path).join(wav_path)
+    }
+}
+
+fn write_binary_file_atomically(path: &Path, bytes: &[u8]) -> Result<(), AppError> {
+    if let Some(parent) = path.parent() {
+        ensure_directory(parent)?;
+    }
+
+    let temporary_path = path.with_extension("tmp");
+    {
+        let mut file = File::create(&temporary_path)?;
+        file.write_all(bytes)?;
+        file.sync_all()?;
+    }
+
+    if path.exists() {
+        fs::remove_file(path)?;
+    }
+    fs::rename(temporary_path, path)?;
+    Ok(())
 }
 
 fn ensure_directory(path: &Path) -> Result<(), AppError> {

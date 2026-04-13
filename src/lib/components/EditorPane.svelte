@@ -7,28 +7,56 @@
   } from "@lucide/svelte";
 
   import Button from "$lib/components/ui/button.svelte";
+  import ConvolutionFilePanel from '$lib/components/ConvolutionFilePanel.svelte';
+  import type { PresetConvolution } from '$lib/types';
 
   let {
     groupName = null,
     presetName = null,
     presetFilePath = null,
+    configPath = null,
+    panelKey = '',
+    presetConvolution = null,
     draft = "",
     dirty = false,
     onSave,
     onApply,
     onExport,
     onEditConfig,
+    onToggleConvolution,
   } = $props<{
     groupName?: string | null;
     presetName?: string | null;
     presetFilePath?: string | null;
+    configPath?: string | null;
+    panelKey?: string;
+    presetConvolution?: PresetConvolution | null;
     draft?: string;
     dirty?: boolean;
     onSave?: () => void;
     onApply?: () => void;
     onExport?: () => void;
     onEditConfig?: () => void;
+    onToggleConvolution?: (value: {
+      groupName: string;
+      presetName: string;
+      enabled: boolean;
+    }) => Promise<boolean> | boolean;
   }>();
+
+  function handleToggleConvolution(value: { enabled: boolean }) {
+    if (!groupName || !presetName) {
+      return false;
+    }
+
+    return (
+      onToggleConvolution?.({
+        groupName,
+        presetName,
+        enabled: value.enabled
+      }) ?? false
+    );
+  }
 </script>
 
 <section class="flex h-full min-h-0 flex-col overflow-hidden bg-surface">
@@ -77,6 +105,18 @@
 
     </div>
   </div>
+
+  {#if groupName && presetName}
+    <div class="border-b border-border/60 px-6 py-4">
+      <ConvolutionFilePanel
+        {draft}
+        {configPath}
+        {panelKey}
+        presetError={presetConvolution?.error ?? null}
+        onToggleConvolution={handleToggleConvolution}
+      />
+    </div>
+  {/if}
 
 
 

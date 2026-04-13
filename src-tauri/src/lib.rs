@@ -10,9 +10,11 @@ use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 
 use crate::{
     commands::{
-        apply_preset, create_group, create_preset, delete_group, delete_preset, export_app_settings,
-        export_preset, get_config_path, import_presets, load_presets, move_preset, rebuild_tray_menu,
-        import_app_settings, rename_group, rename_preset, reorder_groups, save_preset, set_config_path, set_group_emoji,
+        apply_preset, attach_convolution_wav, create_group, create_preset, delete_group,
+        delete_preset, export_app_settings, export_preset, get_config_path, import_app_settings,
+        import_presets, load_presets, move_preset, rebuild_tray_menu, remove_convolution_wav,
+        rename_group, rename_preset, reorder_groups, reveal_path_in_explorer, save_preset,
+        set_config_path, set_group_emoji,
     },
     state::{AppError, AppState, PresetLibrary, TraySelection, EVENT_PRESETS_UPDATED},
 };
@@ -73,10 +75,13 @@ pub fn run() {
             delete_preset,
             move_preset,
             import_presets,
+            attach_convolution_wav,
+            remove_convolution_wav,
             export_app_settings,
             import_app_settings,
             export_preset,
-            rebuild_tray_menu
+            rebuild_tray_menu,
+            reveal_path_in_explorer
         ]);
 
     if let Err(error) = builder.run(tauri::generate_context!()) {

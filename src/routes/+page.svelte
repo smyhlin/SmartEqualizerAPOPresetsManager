@@ -1,12 +1,12 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { ask, open, save } from '@tauri-apps/plugin-dialog';
   import {
     AudioLines,
     Download,
     FolderInput,
     Search,
   } from '@lucide/svelte';
+  import { open, save, ask } from '@tauri-apps/plugin-dialog';
 
   import Button from '$lib/components/ui/button.svelte';
   import Input from '$lib/components/ui/input.svelte';
@@ -102,6 +102,17 @@
     return (
       currentGroup(snapshot)?.presets.find((preset) => preset.name === selectedPresetName) ?? null
     );
+  }
+
+  function presetForGroup(snapshot: PresetLibrary | null, groupName: string, presetName: string) {
+    return (
+      snapshot?.groups.find((group) => group.name === groupName)?.presets.find((preset) => preset.name === presetName) ??
+      null
+    );
+  }
+
+  function isSelectedPreset(groupName: string, presetName: string) {
+    return selectedGroupName === groupName && selectedPresetName === presetName;
   }
 
   async function confirmDiscardIfNeeded() {
@@ -326,7 +337,7 @@
   async function handleImportPresets() {
     const selection = await open({
       multiple: true,
-      filters: [{ name: 'Equalizer APO Presets', extensions: ['txt'] }]
+      filters: [{ name: 'Equalizer APO presets or WAV files', extensions: ['txt', 'wav'] }]
     });
 
     const paths = Array.isArray(selection) ? selection : selection ? [selection] : [];
@@ -352,6 +363,63 @@
       () => presetStore.importPresets(targetGroupName as string, paths),
       `Imported ${paths.length} preset${paths.length === 1 ? '' : 's'}`
     );
+  }
+
+  async function handleToggleConvolution(value: { groupName: string; presetName: string; enabled: boolean }) {
+    const preset = presetForGroup(library, value.groupName, value.presetName);
+    const baseContent =
+      isSelectedPreset(value.groupName, value.presetName) && dirty
+        ? draft
+        : preset?.content ?? '';
+
+    if (value.enabled) {
+      const selection = await open({
+        multiple: false,
+        filters: [{ name: 'Convolution WAV', extensions: ['wav'] }]
+      });
+
+      if (typeof selection !== 'string') {
+        return false;
+      }
+
+      const snapshot = await withBusy(
+        () =>
+          presetStore.attachConvolutionWav(
+            value.groupName,
+            value.presetName,
+            baseContent,
+            selection
+          ),
+        `Linked convolution WAV for ${value.presetName}`
+      );
+
+      if (!snapshot) {
+        return false;
+      }
+
+      if (isSelectedPreset(value.groupName, value.presetName)) {
+        draft = presetForGroup(snapshot, value.groupName, value.presetName)?.content ?? draft;
+        dirty = false;
+      }
+
+      return true;
+    }
+
+    const snapshot = await withBusy(
+      () => presetStore.removeConvolutionWav(value.groupName, value.presetName, baseContent),
+      `Removed convolution WAV from ${value.presetName}`
+    );
+
+    if (!snapshot) {
+      return false;
+    }
+
+    if (isSelectedPreset(value.groupName, value.presetName)) {
+      draft = presetForGroup(snapshot, value.groupName, value.presetName)?.content ?? draft;
+      dirty = false;
+    }
+
+    return true;
   }
 
   async function handleImportAppData() {
@@ -513,12 +581,16 @@
       <EditorPane
         groupName={selectedGroupName}
         presetName={selectedPresetName}
+        configPath={library?.configPath ?? null}
+        panelKey={selectedGroupName && selectedPresetName ? `${selectedGroupName}::${selectedPresetName}` : ''}
+        presetConvolution={currentPreset()?.convolution ?? null}
         {draft}
         {dirty}
         onSave={handleSave}
         onApply={handleApply}
         onExport={handleExport}
         onEditConfig={handleOpenConfigEditor}
+        onToggleConvolution={handleToggleConvolution}
       />
     </main>
 
@@ -533,13 +605,14 @@
           ? `${library.appDataDir}\\presets\\${selectedGroupName}\\${selectedPresetName}.txt`
           : null
       }
-      configPath={library?.configPath ?? 'Loading...'}
-      onDraftChange={(value: string) => {
-        draft = value;
-        dirty = currentPreset()?.content !== draft;
-      }}
+      configPath={library?.configPath ?? null}
+      configTargetLabel="Equalizer APO config"
+      panelKey={selectedGroupName && selectedPresetName ? `${selectedGroupName}::${selectedPresetName}` : ''}
+      presetConvolution={currentPreset()?.convolution ?? null}
+      onDraftChange={(value) => { draft = value; dirty = true; }}
       onSave={handleSave}
       onClose={handleCloseConfigEditor}
+      onToggleConvolution={handleToggleConvolution}
     />
 
     <footer class="shell-surface mt-4 flex flex-col gap-3 px-4 py-3 text-sm md:flex-row md:items-center md:justify-between">
@@ -558,9 +631,16 @@
         <span class="min-w-0 truncate text-muted">{statusMessage}</span>
       </div>
 
-      <div class="text-muted">
-        App data folder:
-        <span class="ml-1 font-mono text-foreground">{library?.appDataDir ?? '%APPDATA%\\SmartEqualizerAPO'}</span>
+      <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-muted">
+        <span>
+          App data folder:
+          <span class="ml-1 font-mono text-foreground">{library?.appDataDir ?? '%APPDATA%\\SmartEqualizerAPO'}</span>
+        </span>
+        <span class="h-3 w-px bg-border/60 hidden md:inline-block"></span>
+        <span>
+          APO EQ config:
+          <span class="ml-1 font-mono text-foreground">{library?.configPath ?? '%ProgramFiles%\\EqualizerAPO\\config'}</span>
+        </span>
       </div>
     </footer>
   </div>

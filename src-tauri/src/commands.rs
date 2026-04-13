@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::{path::PathBuf, process::Command};
 
 use tauri::{AppHandle, State};
 
@@ -203,6 +203,37 @@ pub fn import_presets(
 }
 
 #[tauri::command]
+pub fn attach_convolution_wav(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    group: String,
+    name: String,
+    content: String,
+    source_path: String,
+) -> Result<PresetLibrary, AppError> {
+    {
+        let mut guard = state.lock()?;
+        guard.attach_convolution_wav(&group, &name, &content, &PathBuf::from(source_path))?;
+    }
+    refresh_runtime(&app)
+}
+
+#[tauri::command]
+pub fn remove_convolution_wav(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    group: String,
+    name: String,
+    content: String,
+) -> Result<PresetLibrary, AppError> {
+    {
+        let mut guard = state.lock()?;
+        guard.remove_convolution_wav(&group, &name, &content)?;
+    }
+    refresh_runtime(&app)
+}
+
+#[tauri::command]
 pub fn export_preset(
     state: State<'_, AppState>,
     group: String,
@@ -239,4 +270,25 @@ pub fn import_app_settings(
 #[tauri::command]
 pub fn rebuild_tray_menu(app: AppHandle) -> Result<PresetLibrary, AppError> {
     refresh_runtime(&app)
+}
+
+#[tauri::command]
+pub fn reveal_path_in_explorer(path: String) -> Result<(), AppError> {
+    let target = PathBuf::from(path);
+    if !target.exists() {
+        return Err(AppError::Message(format!(
+            "The file or folder does not exist: {}",
+            target.display()
+        )));
+    }
+
+    if target.is_dir() {
+        Command::new("explorer.exe").arg(target).spawn()?;
+    } else {
+        Command::new("explorer.exe")
+            .arg(format!("/select,{}", target.display()))
+            .spawn()?;
+    }
+
+    Ok(())
 }

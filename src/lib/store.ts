@@ -64,6 +64,10 @@ export const presetStore = {
     runMutation(() => backend.movePreset(oldGroup, newGroup, name, targetIndex)),
   importPresets: (group: string, paths: string[]) =>
     runMutation(() => backend.importPresets(group, paths)),
+  attachConvolutionWav: (group: string, name: string, content: string, sourcePath: string) =>
+    runMutation(() => backend.attachConvolutionWav(group, name, content, sourcePath)),
+  removeConvolutionWav: (group: string, name: string, content: string) =>
+    runMutation(() => backend.removeConvolutionWav(group, name, content)),
   exportPreset: (group: string, name: string, destination: string) =>
     backend.exportPreset(group, name, destination),
   exportAppSettings: (destination: string) => backend.exportAppSettings(destination),

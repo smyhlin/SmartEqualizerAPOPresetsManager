@@ -46,7 +46,10 @@
     const query = search.trim().toLowerCase();
     if (!query) return list;
     return list.filter((p: PresetItem) =>
-      p.name.toLowerCase().includes(query) || p.content.toLowerCase().includes(query)
+      p.name.toLowerCase().includes(query) ||
+      p.content.toLowerCase().includes(query) ||
+      p.convolution?.wavPath.toLowerCase().includes(query) ||
+      p.convolution?.error?.toLowerCase().includes(query)
     );
   });
 
@@ -126,7 +129,13 @@
 
       {#if group}
         <div class="flex shrink-0 items-center gap-2">
-          <Button size="icon" variant="secondary" title="Import presets" ariaLabel="Import presets" onclick={() => onImport?.()}>
+          <Button
+            size="icon"
+            variant="secondary"
+            title="Import presets or WAV files"
+            ariaLabel="Import presets or WAV files"
+            onclick={() => onImport?.()}
+          >
             <FolderInput size={16} />
           </Button>
           <Button size="icon" variant="secondary" title="Add preset" ariaLabel="Add preset" onclick={() => (creating = !creating)}>
@@ -267,6 +276,7 @@
                 </Button>
               </div>
             </div>
+
           {/if}
         </div>
       {/each}

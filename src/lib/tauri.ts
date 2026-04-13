@@ -75,6 +75,24 @@ export function importPresets(group: string, paths: string[]) {
   return invoke<PresetLibrary>('import_presets', { group, paths });
 }
 
+export function attachConvolutionWav(
+  group: string,
+  name: string,
+  content: string,
+  sourcePath: string
+) {
+  return invoke<PresetLibrary>('attach_convolution_wav', {
+    group,
+    name,
+    content,
+    sourcePath
+  });
+}
+
+export function removeConvolutionWav(group: string, name: string, content: string) {
+  return invoke<PresetLibrary>('remove_convolution_wav', { group, name, content });
+}
+
 export function exportPreset(group: string, name: string, destination: string) {
   return invoke<string>('export_preset', { group, name, destination });
 }
@@ -89,6 +107,10 @@ export function importAppSettings(source: string) {
 
 export function rebuildTrayMenu() {
   return invoke<PresetLibrary>('rebuild_tray_menu');
+}
+
+export function revealPathInExplorer(path: string) {
+  return invoke<void>('reveal_path_in_explorer', { path });
 }
 
 export function onPresetsUpdated(callback: (payload: PresetLibrary) => void) {

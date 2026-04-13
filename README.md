@@ -5,6 +5,7 @@ A desktop application for managing Equalizer APO presets, built with SvelteKit a
 ## Overview
 
 SmartEqualizer APO Presets Manager provides an intuitive graphical interface for applying, syncing, and editing Equalizer APO configuration files, allowing for rapid switching of audio presets.
+It also recognizes convolution presets backed by WAV impulse responses, so you can import `.wav` files, update their linked paths, and reveal them in Explorer from the editor.
 
 ## App stack
 
@@ -52,4 +53,3 @@ npm run tauri build
 ```
 
 The resulting executables will be located in the `src-tauri/target/release/` directory.
-

@@ -2,31 +2,43 @@
   import { Save, X } from '@lucide/svelte';
 
   import Button from '$lib/components/ui/button.svelte';
+  import ConvolutionFilePanel from '$lib/components/ConvolutionFilePanel.svelte';
+  import type { PresetConvolution } from '$lib/types';
 
   let {
     open = false,
     groupName = null,
     presetName = null,
     presetFilePath = null,
+    panelKey = '',
+    presetConvolution = null,
     draft = '',
     dirty = false,
-    configPath = '',
-    configTargetLabel = '',
+    configPath = null,
+    configTargetLabel = 'Equalizer APO config',
     onDraftChange,
     onSave,
     onClose,
+    onToggleConvolution,
   } = $props<{
     open?: boolean;
     groupName?: string | null;
     presetName?: string | null;
     presetFilePath?: string | null;
+    panelKey?: string;
+    presetConvolution?: PresetConvolution | null;
     draft?: string;
     dirty?: boolean;
-    configPath?: string;
+    configPath?: string | null;
     configTargetLabel?: string;
     onDraftChange?: (value: string) => void;
     onSave?: () => void;
     onClose?: () => void;
+    onToggleConvolution?: (value: {
+      groupName: string;
+      presetName: string;
+      enabled: boolean;
+    }) => Promise<boolean> | boolean;
   }>();
 
   let localValue = $state('');
@@ -36,21 +48,46 @@
   $effect(() => {
     const nextKey = open ? `${groupName ?? ''}::${presetName ?? ''}::${presetFilePath ?? ''}` : '';
 
-    if (open && nextKey !== activeKey) {
-      localValue = draft;
-      queueMicrotask(() => {
-        editorElement?.focus();
-        editorElement?.setSelectionRange(editorElement.value.length, editorElement.value.length);
-      });
-    }
-
     if (!open) {
       activeKey = '';
       return;
     }
 
+    if (nextKey !== activeKey) {
+      localValue = draft;
+      queueMicrotask(() => {
+        editorElement?.focus();
+        editorElement?.setSelectionRange(editorElement.value.length, editorElement.value.length);
+      });
+      activeKey = nextKey;
+      return;
+    }
+
+    if (localValue !== draft) {
+      localValue = draft;
+    }
+
     activeKey = nextKey;
   });
+
+  function updateDraft(value: string) {
+    localValue = value;
+    onDraftChange?.(value);
+  }
+
+  function handleToggleConvolution(value: { enabled: boolean }) {
+    if (!groupName || !presetName) {
+      return false;
+    }
+
+    return (
+      onToggleConvolution?.({
+        groupName,
+        presetName,
+        enabled: value.enabled
+      }) ?? false
+    );
+  }
 
   function close() {
     onClose?.();
@@ -117,6 +154,16 @@
         </div>
       </div>
 
+      <div class="border-b border-border px-4 py-3">
+        <ConvolutionFilePanel
+          draft={localValue}
+          {configPath}
+          {panelKey}
+          presetError={presetConvolution?.error ?? null}
+          onToggleConvolution={handleToggleConvolution}
+        />
+      </div>
+
       <div class="flex min-h-0 flex-1 p-4">
         <div class="flex min-h-0 flex-1 overflow-hidden rounded-[14px] border border-accent/20 bg-[#08131b] shadow-[inset_0_0_0_1px_rgba(132,204,22,0.05)]">
           <textarea
@@ -129,7 +176,7 @@
             autocapitalize="off"
             wrap="soft"
             class="h-full min-h-0 flex-1 resize-none rounded-none border-0 bg-transparent px-4 py-4 font-mono text-[13px] leading-6 text-[#dce6f5] caret-[#84cc16] shadow-none outline-none placeholder:text-[#6f8094] focus:outline-none"
-            oninput={() => onDraftChange?.(localValue)}
+            oninput={() => updateDraft(localValue)}
           ></textarea>
         </div>
       </div>
