@@ -28,3 +28,7 @@ export type PresetLibrary = {
   needsConfigMigration: boolean;
   configPathPrompted: boolean;
 };
+
+export type AppRuntimeSettings = {
+  autorunEnabled: boolean;
+};

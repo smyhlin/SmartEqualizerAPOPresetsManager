@@ -1,9 +1,10 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 
-import type { PresetLibrary } from '$lib/types';
+import type { AppRuntimeSettings, PresetLibrary } from '$lib/types';
 
 export const PRESETS_UPDATED_EVENT = 'smart-equalizer://presets-updated';
+export const SETTINGS_UPDATED_EVENT = 'smart-equalizer://settings-updated';
 
 export function getConfigPath() {
   return invoke<string>('get_config_path');
@@ -109,12 +110,28 @@ export function rebuildTrayMenu() {
   return invoke<PresetLibrary>('rebuild_tray_menu');
 }
 
+export function getAutorunEnabled() {
+  return invoke<boolean>('get_autorun_enabled');
+}
+
+export function setAutorunEnabled(enabled: boolean) {
+  return invoke<boolean>('set_autorun_enabled', { enabled });
+}
+
 export function revealPathInExplorer(path: string) {
   return invoke<void>('reveal_path_in_explorer', { path });
 }
 
 export function onPresetsUpdated(callback: (payload: PresetLibrary) => void) {
   return listen<PresetLibrary>(PRESETS_UPDATED_EVENT, (event) => {
+    callback(event.payload);
+  });
+}
+
+export function onRuntimeSettingsUpdated(
+  callback: (payload: AppRuntimeSettings) => void
+) {
+  return listen<AppRuntimeSettings>(SETTINGS_UPDATED_EVENT, (event) => {
     callback(event.payload);
   });
 }

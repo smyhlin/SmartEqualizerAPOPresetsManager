@@ -7,21 +7,28 @@ use tauri::{
     AppHandle, Emitter, Manager, Runtime, State, WindowEvent,
 };
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
+#[cfg(desktop)]
+use tauri_plugin_autostart::ManagerExt as AutostartManagerExt;
 
 use crate::{
     commands::{
         apply_preset, attach_convolution_wav, create_group, create_preset, delete_group,
-        delete_preset, export_app_settings, export_preset, get_config_path, import_app_settings,
-        import_presets, load_presets, move_preset, rebuild_tray_menu, remove_convolution_wav,
-        rename_group, rename_preset, reorder_groups, reveal_path_in_explorer, save_preset,
-        set_config_path, set_group_emoji,
+        delete_preset, export_app_settings, export_preset, get_autorun_enabled, get_config_path,
+        import_app_settings, import_presets, load_presets, move_preset, rebuild_tray_menu,
+        remove_convolution_wav, rename_group, rename_preset, reorder_groups,
+        reveal_path_in_explorer, save_preset, set_autorun_enabled, set_config_path,
+        set_group_emoji,
     },
-    state::{AppError, AppState, PresetLibrary, TraySelection, EVENT_PRESETS_UPDATED},
+    state::{
+        AppError, AppRuntimeSettings, AppState, PresetLibrary, TraySelection,
+        EVENT_PRESETS_UPDATED, EVENT_SETTINGS_UPDATED,
+    },
 };
 
 const TRAY_ID: &str = "smart-equalizer-tray";
 const WINDOW_LABEL: &str = "main";
 const MENU_ID_MANAGE: &str = "menu.manage";
+const MENU_ID_AUTORUN: &str = "menu.autorun";
 const MENU_ID_ABOUT: &str = "menu.about";
 const MENU_ID_EXIT: &str = "menu.exit";
 const MENU_ID_EMPTY_GROUPS: &str = "menu.empty-groups";
@@ -33,7 +40,17 @@ pub fn try_handle_cli_mode() -> Option<i32> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let builder = tauri::Builder::default()
+    let mut builder = tauri::Builder::default();
+
+    #[cfg(desktop)]
+    {
+        builder = builder.plugin(tauri_plugin_single_instance::init(|app, _, _| {
+            let _ = show_main_window(&app);
+        }));
+        builder = builder.plugin(tauri_plugin_autostart::Builder::new().build());
+    }
+
+    let builder = builder
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let state = AppState::initialize()?;
@@ -80,6 +97,8 @@ pub fn run() {
             export_app_settings,
             import_app_settings,
             export_preset,
+            get_autorun_enabled,
+            set_autorun_enabled,
             rebuild_tray_menu,
             reveal_path_in_explorer
         ]);
@@ -99,7 +118,71 @@ pub(crate) fn refresh_runtime<R: Runtime>(app: &AppHandle<R>) -> Result<PresetLi
     };
 
     app.emit(EVENT_PRESETS_UPDATED, snapshot.clone())?;
+    let _ = emit_runtime_settings(app)?;
     Ok(snapshot)
+}
+
+pub(crate) fn refresh_runtime_settings<R: Runtime>(
+    app: &AppHandle<R>,
+) -> Result<AppRuntimeSettings, AppError> {
+    rebuild_native_tray_menu(app)?;
+    emit_runtime_settings(app)
+}
+
+pub(crate) fn current_runtime_settings<R: Runtime>(
+    app: &AppHandle<R>,
+) -> Result<AppRuntimeSettings, AppError> {
+    Ok(AppRuntimeSettings {
+        autorun_enabled: current_autorun_enabled(app)?,
+    })
+}
+
+pub(crate) fn set_autorun_enabled_state<R: Runtime>(
+    app: &AppHandle<R>,
+    enabled: bool,
+) -> Result<(), AppError> {
+    #[cfg(desktop)]
+    {
+        let autostart = app.autolaunch();
+        if enabled {
+            autostart
+                .enable()
+                .map_err(|error| AppError::Message(format!("Failed to enable Windows startup: {error}")))?;
+        } else {
+            autostart
+                .disable()
+                .map_err(|error| AppError::Message(format!("Failed to disable Windows startup: {error}")))?;
+        }
+    }
+
+    #[cfg(not(desktop))]
+    {
+        let _ = (app, enabled);
+    }
+
+    Ok(())
+}
+
+fn emit_runtime_settings<R: Runtime>(app: &AppHandle<R>) -> Result<AppRuntimeSettings, AppError> {
+    let settings = current_runtime_settings(app)?;
+    app.emit(EVENT_SETTINGS_UPDATED, settings.clone())?;
+    Ok(settings)
+}
+
+fn current_autorun_enabled<R: Runtime>(app: &AppHandle<R>) -> Result<bool, AppError> {
+    #[cfg(desktop)]
+    {
+        return app
+            .autolaunch()
+            .is_enabled()
+            .map_err(|error| AppError::Message(format!("Failed to read Windows startup setting: {error}")));
+    }
+
+    #[cfg(not(desktop))]
+    {
+        let _ = app;
+        Ok(false)
+    }
 }
 
 fn configure_main_window<R: Runtime>(app: &AppHandle<R>) -> Result<(), AppError> {
@@ -214,6 +297,7 @@ fn show_about_dialog<R: Runtime>(app: &AppHandle<R>) -> Result<(), AppError> {
 fn handle_tray_menu_event<R: Runtime>(app: &AppHandle<R>, event: tauri::menu::MenuEvent) {
     let result = match event.id().as_ref() {
         MENU_ID_MANAGE => show_main_window(app),
+        MENU_ID_AUTORUN => toggle_autorun_from_tray(app),
         MENU_ID_ABOUT => show_about_dialog(app),
         MENU_ID_EXIT => {
             app.exit(0);
@@ -260,6 +344,13 @@ fn apply_from_tray<R: Runtime>(app: &AppHandle<R>, item_id: &str) -> Result<(), 
     Ok(())
 }
 
+fn toggle_autorun_from_tray<R: Runtime>(app: &AppHandle<R>) -> Result<(), AppError> {
+    let next_enabled = !current_autorun_enabled(app)?;
+    set_autorun_enabled_state(app, next_enabled)?;
+    let _ = refresh_runtime_settings(app)?;
+    Ok(())
+}
+
 fn rebuild_native_tray_menu<R: Runtime>(app: &AppHandle<R>) -> Result<(), AppError> {
     let menu = construct_tray_menu(app)?;
     let tray = app.tray_by_id(TRAY_ID).ok_or(AppError::MissingTray)?;
@@ -276,15 +367,27 @@ fn construct_tray_menu<R: Runtime>(app: &AppHandle<R>) -> Result<Menu<R>, AppErr
         guard.replace_tray_targets(targets.clone());
         (snapshot, targets)
     };
+    let autorun_enabled = current_autorun_enabled(app)?;
 
     let presets_submenu = build_presets_submenu(app, &snapshot, &targets)?;
     let manage_item = MenuItemBuilder::with_id(MENU_ID_MANAGE, "Manage Presets...").build(app)?;
+    let autorun_item =
+        CheckMenuItemBuilder::with_id(MENU_ID_AUTORUN, "Launch on Windows startup")
+            .checked(autorun_enabled)
+            .build(app)?;
     let about_item = MenuItemBuilder::with_id(MENU_ID_ABOUT, "About...").build(app)?;
     let exit_item = MenuItemBuilder::with_id(MENU_ID_EXIT, "Exit").build(app)?;
     let separator = PredefinedMenuItem::separator(app)?;
 
     MenuBuilder::new(app)
-        .items(&[&presets_submenu, &manage_item, &separator, &about_item, &exit_item])
+        .items(&[
+            &presets_submenu,
+            &manage_item,
+            &autorun_item,
+            &separator,
+            &about_item,
+            &exit_item,
+        ])
         .build()
         .map_err(AppError::from)
 }

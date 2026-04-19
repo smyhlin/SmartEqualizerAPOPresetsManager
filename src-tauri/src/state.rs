@@ -19,6 +19,7 @@ use winreg::{
 
 pub const APP_FOLDER_NAME: &str = "SmartEqualizerAPO";
 pub const EVENT_PRESETS_UPDATED: &str = "smart-equalizer://presets-updated";
+pub const EVENT_SETTINGS_UPDATED: &str = "smart-equalizer://settings-updated";
 pub const REGISTRY_KEY_PATH: &str = r"SOFTWARE\EqualizerAPO";
 pub const REGISTRY_VALUE_NAME: &str = "ConfigPath";
 pub const REGISTRY_INSTALL_PATH_VALUE_NAME: &str = "InstallPath";
@@ -81,6 +82,12 @@ pub struct PresetLibrary {
     pub groups: Vec<PresetGroup>,
     pub needs_config_migration: bool,
     pub config_path_prompted: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct AppRuntimeSettings {
+    pub autorun_enabled: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

@@ -15,7 +15,8 @@
   import PresetWorkspace from '$lib/components/PresetWorkspace.svelte';
   import EditorPane from '$lib/components/EditorPane.svelte';
   import { presetStore } from '$lib/store';
-  import type { PresetGroup, PresetItem, PresetLibrary } from '$lib/types';
+  import { getAutorunEnabled, onRuntimeSettingsUpdated, setAutorunEnabled } from '$lib/tauri';
+  import type { AppRuntimeSettings, PresetGroup, PresetItem, PresetLibrary } from '$lib/types';
   import { uniqueName } from '$lib/utils';
 
   let library: PresetLibrary | null = null;
@@ -28,12 +29,33 @@
   let configEditorOpen = false;
   let statusMessage = 'Loading presets...';
   let statusTone: 'info' | 'success' | 'error' = 'info';
+  let autorunEnabled = false;
+  let autorunLoaded = false;
+  let autorunBusy = false;
 
   onMount(() => {
     const unsubscribe = presetStore.subscribe((value) => {
       const preserveDraft = dirty && selectionStillExists(value);
       syncSelection(value, preserveDraft);
     });
+    let disposed = false;
+    let unlistenRuntimeSettings: (() => void) | null = null;
+
+    void onRuntimeSettingsUpdated((value) => {
+      if (!disposed) {
+        syncRuntimeSettings(value);
+      }
+    })
+      .then((unlisten) => {
+        if (disposed) {
+          unlisten();
+          return;
+        }
+        unlistenRuntimeSettings = unlisten;
+      })
+      .catch((error) => setStatus(getErrorMessage(error), 'error'));
+
+    void loadAutorunState();
 
     void presetStore
       .start()
@@ -41,7 +63,9 @@
       .catch((error) => setStatus(getErrorMessage(error), 'error'));
 
     return () => {
+      disposed = true;
       unsubscribe();
+      unlistenRuntimeSettings?.();
       void presetStore.stop();
     };
   });
@@ -131,6 +155,12 @@
     statusTone = tone;
   }
 
+  function syncRuntimeSettings(value: AppRuntimeSettings) {
+    autorunEnabled = value.autorunEnabled;
+    autorunLoaded = true;
+    autorunBusy = false;
+  }
+
   function getErrorMessage(error: unknown) {
     if (typeof error === 'string') {
       return error;
@@ -154,6 +184,17 @@
       return null;
     } finally {
       busy = false;
+    }
+  }
+
+  async function loadAutorunState() {
+    try {
+      syncRuntimeSettings({
+        autorunEnabled: await getAutorunEnabled()
+      });
+    } catch (error) {
+      autorunLoaded = true;
+      setStatus(getErrorMessage(error), 'error');
     }
   }
 
@@ -480,6 +521,27 @@
     await withBusy(() => presetStore.exportAppSettings(destination), 'Exported app settings');
   }
 
+  async function handleAutorunToggle(event: Event) {
+    const nextEnabled = (event.currentTarget as HTMLInputElement).checked;
+    autorunBusy = true;
+
+    try {
+      const actualEnabled = await setAutorunEnabled(nextEnabled);
+      syncRuntimeSettings({
+        autorunEnabled: actualEnabled
+      });
+      setStatus(
+        actualEnabled
+          ? 'Launch on Windows startup enabled.'
+          : 'Launch on Windows startup disabled.',
+        'success'
+      );
+    } catch (error) {
+      autorunBusy = false;
+      setStatus(getErrorMessage(error), 'error');
+    }
+  }
+
 
   function handleOpenConfigEditor() {
     if (selectedGroupName && selectedPresetName) {
@@ -641,6 +703,20 @@
           APO EQ config:
           <span class="ml-1 font-mono text-foreground">{library?.configPath ?? '%ProgramFiles%\\EqualizerAPO\\config'}</span>
         </span>
+        <span class="h-3 w-px bg-border/60 hidden md:inline-block"></span>
+        <label
+          class={`inline-flex items-center gap-2 ${autorunLoaded ? 'text-muted' : 'text-muted/70'}`}
+          title="Launch the app automatically when you sign in to Windows"
+        >
+          <input
+            type="checkbox"
+            checked={autorunEnabled}
+            disabled={!autorunLoaded || autorunBusy || busy}
+            onchange={handleAutorunToggle}
+            class="focus-ring size-3.5 rounded border border-border bg-surface-2 accent-accent disabled:cursor-not-allowed disabled:opacity-60"
+          />
+          <span>Launch on Windows startup</span>
+        </label>
       </div>
     </footer>
   </div>

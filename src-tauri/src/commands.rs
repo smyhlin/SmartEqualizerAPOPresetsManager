@@ -3,7 +3,7 @@ use std::{path::PathBuf, process::Command};
 use tauri::{AppHandle, State};
 
 use crate::{
-    refresh_runtime,
+    current_runtime_settings, refresh_runtime, refresh_runtime_settings, set_autorun_enabled_state,
     state::{AppError, AppState, PresetLibrary},
 };
 
@@ -270,6 +270,17 @@ pub fn import_app_settings(
 #[tauri::command]
 pub fn rebuild_tray_menu(app: AppHandle) -> Result<PresetLibrary, AppError> {
     refresh_runtime(&app)
+}
+
+#[tauri::command]
+pub fn get_autorun_enabled(app: AppHandle) -> Result<bool, AppError> {
+    Ok(current_runtime_settings(&app)?.autorun_enabled)
+}
+
+#[tauri::command]
+pub fn set_autorun_enabled(app: AppHandle, enabled: bool) -> Result<bool, AppError> {
+    set_autorun_enabled_state(&app, enabled)?;
+    Ok(refresh_runtime_settings(&app)?.autorun_enabled)
 }
 
 #[tauri::command]
