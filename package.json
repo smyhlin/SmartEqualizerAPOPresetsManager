@@ -2,6 +2,8 @@
   "name": "smartequalizerapopresetsmanager",
   "version": "0.1.0",
   "private": true,
+  "description": "Tray-first Windows 11 preset manager for Equalizer APO.",
+  "license": "MIT",
   "type": "module",
   "scripts": {
     "dev": "vite dev --host",

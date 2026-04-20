@@ -1,5 +1,5 @@
 {
-  "$schema": "./gen/schemas/desktop-schema.json",
+  "$schema": "https://schema.tauri.app/config/2",
   "productName": "SmartEqualizerAPOPresetsManager",
   "version": "0.1.0",
   "identifier": "com.myhli.smartequalizerapopresetsmanager",
@@ -33,6 +33,10 @@
   },
   "bundle": {
     "active": true,
+    "license": "MIT",
+    "licenseFile": "../LICENSE",
+    "shortDescription": "Tray-first Windows 11 preset manager for Equalizer APO.",
+    "longDescription": "SmartEqualizer APO Presets Manager is a Windows 11 desktop app for organizing, editing, applying, importing, exporting, and backing up Equalizer APO presets. It also supports convolution WAV attachments, tray-based preset switching, and launch-on-startup control.",
     "targets": "nsis",
     "icon": [
       "icons/icon.ico",

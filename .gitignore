@@ -28,12 +28,12 @@ pids
 
 # Dependencies
 node_modules/
-.npm/
 
 # Caches
 .eslintcache
 .stylelintcache
-.npm
+.npm/
+*.tsbuildinfo
 
 # Optional REPL history
 .node_repl_history
@@ -49,6 +49,7 @@ node_modules/
 
 # IDEs and Editors
 .idea/
+.vs/
 .vscode/*
 !.vscode/settings.json
 !.vscode/tasks.json

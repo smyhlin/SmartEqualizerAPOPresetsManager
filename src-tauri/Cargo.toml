@@ -1,7 +1,7 @@
 [package]
 name = "smart_equalizer_apo_presets_manager"
 version = "0.1.0"
-description = "SmartEqualizerAPOPresetsManager"
+description = "Tray-first Windows 11 preset manager for Equalizer APO."
 authors = ["myhli"]
 license = "MIT"
 edition = "2021"
