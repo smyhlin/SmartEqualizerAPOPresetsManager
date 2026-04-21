@@ -32,3 +32,9 @@ export type PresetLibrary = {
 export type AppRuntimeSettings = {
   autorunEnabled: boolean;
 };
+
+export type LogSnapshot = {
+  logPath: string;
+  content: string;
+  exists: boolean;
+};

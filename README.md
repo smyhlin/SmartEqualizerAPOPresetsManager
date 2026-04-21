@@ -10,12 +10,15 @@ SmartEqualizer APO Presets Manager is a tray-first Windows 11 desktop app for or
 - Imports Equalizer APO preset files and convolution `.wav` files.
 - Keeps convolution file references synced and can reveal linked files in Explorer.
 - Imports and exports full app-data backups as JSON.
+- Can install or reinstall Equalizer APO from the troubleshooting panel and then open the official Device Selector for playback and capture device selection.
+- Includes footer utility actions for `Logs`, `Troubleshoot`, and `About`, plus a launch-on-startup toggle.
+- Stores readable local-timestamped logs and can open the logs folder directly from the app.
 - Supports optional launch on Windows startup.
 
 ## Scope And Requirements
 
 - Windows 11 only.
-- Requires an existing Equalizer APO installation.
+- Can set up Equalizer APO on demand from the app, but the installer still requires Windows admin approval.
 - Designed for local desktop use; this repository does not include release binaries.
 - The tracked app icons in `src-tauri/icons/` are source assets and are intentionally committed.
 
@@ -26,6 +29,20 @@ SmartEqualizer APO Presets Manager is a tray-first Windows 11 desktop app for or
 - Default writable Equalizer APO config target: `%APPDATA%\\SmartEqualizerAPO\\config`
 
 If Equalizer APO is still pointing at a protected config directory, the app prompts to move its `ConfigPath` to the writable app-managed folder. Changing `ConfigPath` or updating protected Equalizer APO files can trigger a Windows UAC prompt.
+
+## Equalizer APO Setup
+
+Use the `Troubleshoot` button in the main window to:
+
+- Download and silently install Equalizer APO with the official `/S` installer.
+- Re-run the same install chain if the install needs to be repaired.
+- Open the official Device Selector so you can choose the playback and capture devices that should receive APO processing.
+
+The troubleshooting panel also shows whether Equalizer APO is detected, the active config path, and whether the current config path looks writable.
+
+## Release Notes
+
+Version `0.2.0` adds the new footer utility buttons (`Logs`, `Troubleshoot`, and `About`), a log viewer with readable timestamps and direct log-folder access, browser launching for the repository link, and backend install/reinstall functions for Equalizer APO repair and Device Selector reopening.
 
 ## Development
 

@@ -1,6 +1,6 @@
 [package]
 name = "smart_equalizer_apo_presets_manager"
-version = "0.1.0"
+version = "0.2.0"
 description = "Tray-first Windows 11 preset manager for Equalizer APO."
 authors = ["myhli"]
 license = "MIT"
@@ -15,12 +15,14 @@ tauri-build = { version = "2.5.6", features = [] }
 
 [dependencies]
 base64 = "0.22.1"
+chrono = "0.4.42"
 dirs = "6.0.0"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
 tauri = { version = "2.10.3", features = ["tray-icon"] }
 tauri-plugin-dialog = "2.7.0"
 thiserror = "2.0.18"
+webbrowser = "1.0.6"
 winreg = "0.56.0"
 
 [target.'cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))'.dependencies]

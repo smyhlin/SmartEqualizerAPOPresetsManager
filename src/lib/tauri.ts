@@ -1,7 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 
-import type { AppRuntimeSettings, PresetLibrary } from '$lib/types';
+import type { AppRuntimeSettings, LogSnapshot, PresetLibrary } from '$lib/types';
 
 export const PRESETS_UPDATED_EVENT = 'smart-equalizer://presets-updated';
 export const SETTINGS_UPDATED_EVENT = 'smart-equalizer://settings-updated';
@@ -12,6 +12,26 @@ export function getConfigPath() {
 
 export function setConfigPath(newPath: string) {
   return invoke<PresetLibrary>('set_config_path', { newPath });
+}
+
+export function installOrReinstallApo() {
+  return invoke<PresetLibrary>('install_or_reinstall_apo');
+}
+
+export function openApoDeviceSelector() {
+  return invoke<void>('open_apo_device_selector');
+}
+
+export function openRepositoryUrl() {
+  return invoke<void>('open_repository_url');
+}
+
+export function loadLogs() {
+  return invoke<LogSnapshot>('load_logs');
+}
+
+export function openLogsLocation() {
+  return invoke<void>('open_logs_location');
 }
 
 export function loadPresets() {

@@ -1,4 +1,5 @@
 mod commands;
+mod logging;
 mod state;
 
 use tauri::{
@@ -14,11 +15,12 @@ use crate::{
     commands::{
         apply_preset, attach_convolution_wav, create_group, create_preset, delete_group,
         delete_preset, export_app_settings, export_preset, get_autorun_enabled, get_config_path,
-        import_app_settings, import_presets, load_presets, move_preset, rebuild_tray_menu,
-        remove_convolution_wav, rename_group, rename_preset, reorder_groups,
-        reveal_path_in_explorer, save_preset, set_autorun_enabled, set_config_path,
-        set_group_emoji,
+        import_app_settings, import_presets, install_or_reinstall_apo, load_logs, load_presets,
+        move_preset, open_apo_device_selector, open_repository_url, rebuild_tray_menu,
+        open_logs_location, remove_convolution_wav, rename_group, rename_preset, reorder_groups,
+        reveal_path_in_explorer, save_preset, set_autorun_enabled, set_config_path, set_group_emoji,
     },
+    logging::append_log_line,
     state::{
         AppError, AppRuntimeSettings, AppState, PresetLibrary, TraySelection,
         EVENT_PRESETS_UPDATED, EVENT_SETTINGS_UPDATED,
@@ -55,6 +57,7 @@ pub fn run() {
         .setup(|app| {
             let state = AppState::initialize()?;
             app.manage(state);
+            append_log_line("INFO", "Application initialized.");
 
             let menu = construct_tray_menu(app.handle())?;
             let icon = app
@@ -92,6 +95,7 @@ pub fn run() {
             delete_preset,
             move_preset,
             import_presets,
+            install_or_reinstall_apo,
             attach_convolution_wav,
             remove_convolution_wav,
             export_app_settings,
@@ -100,11 +104,15 @@ pub fn run() {
             get_autorun_enabled,
             set_autorun_enabled,
             rebuild_tray_menu,
-            reveal_path_in_explorer
+            reveal_path_in_explorer,
+            open_apo_device_selector,
+            load_logs,
+            open_repository_url,
+            open_logs_location
         ]);
 
     if let Err(error) = builder.run(tauri::generate_context!()) {
-        eprintln!("{error}");
+        append_log_line("ERROR", error.to_string());
     }
 }
 
@@ -192,7 +200,7 @@ fn configure_main_window<R: Runtime>(app: &AppHandle<R>) -> Result<(), AppError>
             if let WindowEvent::CloseRequested { api, .. } = event {
                 api.prevent_close();
                 if let Err(error) = window_clone.hide() {
-                    eprintln!("{error}");
+                    append_log_line("ERROR", error.to_string());
                 }
             }
         });
@@ -322,7 +330,7 @@ fn handle_tray_icon_event<R: Runtime>(tray: &tauri::tray::TrayIcon<R>, event: Tr
     } = event
     {
         if let Err(error) = show_main_window(tray.app_handle()) {
-            eprintln!("{error}");
+            append_log_line("ERROR", error.to_string());
         }
     }
 }

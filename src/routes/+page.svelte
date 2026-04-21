@@ -10,13 +10,26 @@
 
   import Button from '$lib/components/ui/button.svelte';
   import Input from '$lib/components/ui/input.svelte';
+  import AboutModal from '$lib/components/AboutModal.svelte';
   import ConfigEditorModal from '$lib/components/ConfigEditorModal.svelte';
   import GroupSidebar from '$lib/components/GroupSidebar.svelte';
+  import LogsModal from '$lib/components/LogsModal.svelte';
+  import FooterBar from '$lib/components/layout/FooterBar.svelte';
   import PresetWorkspace from '$lib/components/PresetWorkspace.svelte';
   import EditorPane from '$lib/components/EditorPane.svelte';
+  import TroubleshootModal from '$lib/components/TroubleshootModal.svelte';
   import { presetStore } from '$lib/store';
-  import { getAutorunEnabled, onRuntimeSettingsUpdated, setAutorunEnabled } from '$lib/tauri';
-  import type { AppRuntimeSettings, PresetGroup, PresetItem, PresetLibrary } from '$lib/types';
+  import {
+    getAutorunEnabled,
+    loadLogs,
+    installOrReinstallApo,
+    onRuntimeSettingsUpdated,
+    openApoDeviceSelector,
+    openRepositoryUrl,
+    openLogsLocation,
+    setAutorunEnabled
+  } from '$lib/tauri';
+  import type { AppRuntimeSettings, LogSnapshot, PresetGroup, PresetItem, PresetLibrary } from '$lib/types';
   import { uniqueName } from '$lib/utils';
 
   let library: PresetLibrary | null = null;
@@ -27,6 +40,13 @@
   let busy = false;
   let search = '';
   let configEditorOpen = false;
+  let aboutOpen = false;
+  let troubleshootOpen = false;
+  let logsOpen = false;
+  let logsLoading = false;
+  let logsContent = '';
+  let logsPath = '';
+  let logsExists = false;
   let statusMessage = 'Loading presets...';
   let statusTone: 'info' | 'success' | 'error' = 'info';
   let autorunEnabled = false;
@@ -488,6 +508,59 @@
     await withBusy(() => presetStore.importAppSettings(selection), 'Imported app settings');
   }
 
+  async function handleInstallOrReinstallApo() {
+    await withBusy(
+      () => installOrReinstallApo(),
+      'Equalizer APO finished installing and Device Selector opened.'
+    );
+  }
+
+  async function handleOpenApoDeviceSelector() {
+    await withBusy(() => openApoDeviceSelector(), 'Device Selector opened.');
+  }
+
+  async function loadLogsSnapshot() {
+    logsLoading = true;
+    try {
+      const snapshot: LogSnapshot = await loadLogs();
+      logsContent = snapshot.content;
+      logsPath = snapshot.logPath;
+      logsExists = snapshot.exists;
+    } catch (error) {
+      logsContent = getErrorMessage(error);
+      logsPath = '';
+      logsExists = false;
+      setStatus(getErrorMessage(error), 'error');
+    } finally {
+      logsLoading = false;
+    }
+  }
+
+  function handleOpenLogs() {
+    logsOpen = true;
+    void loadLogsSnapshot();
+  }
+
+  function handleCloseLogs() {
+    logsOpen = false;
+  }
+
+  async function handleOpenLogsLocation() {
+    try {
+      await openLogsLocation();
+    } catch (error) {
+      setStatus(getErrorMessage(error), 'error');
+    }
+  }
+
+  async function handleOpenRepository() {
+    try {
+      await openRepositoryUrl();
+    } catch (error) {
+      setStatus(getErrorMessage(error), 'error');
+    }
+  }
+
   async function handleExport() {
     if (!selectedGroupName || !selectedPresetName) {
       return;
@@ -553,7 +626,21 @@
     configEditorOpen = false;
   }
 
+  function handleOpenAbout() {
+    aboutOpen = true;
+  }
 
+  function handleCloseAbout() {
+    aboutOpen = false;
+  }
+
+  function handleOpenTroubleshoot() {
+    troubleshootOpen = true;
+  }
+
+  function handleCloseTroubleshoot() {
+    troubleshootOpen = false;
+  }
 </script>
 
 <svelte:head>
@@ -603,7 +690,6 @@
             <Download size={14} />
             Export App Data
           </Button>
-
         </div>
       </div>
 
@@ -677,47 +763,42 @@
       onToggleConvolution={handleToggleConvolution}
     />
 
-    <footer class="shell-surface mt-4 flex flex-col gap-3 px-4 py-3 text-sm md:flex-row md:items-center md:justify-between">
-      <div class="flex min-w-0 items-center gap-3">
-        <span
-          class={`inline-flex shrink-0 items-center rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] ${
-            statusTone === 'success'
-              ? 'bg-success-soft text-success'
-              : statusTone === 'error'
-                ? 'bg-danger-soft text-danger'
-                : 'bg-accent-soft text-accent'
-          }`}
-        >
-          {busy ? 'Working' : statusTone}
-        </span>
-        <span class="min-w-0 truncate text-muted">{statusMessage}</span>
-      </div>
+    <AboutModal
+      open={aboutOpen}
+      onClose={handleCloseAbout}
+      onOpenRepository={handleOpenRepository}
+    />
 
-      <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-muted">
-        <span>
-          App data folder:
-          <span class="ml-1 font-mono text-foreground">{library?.appDataDir ?? '%APPDATA%\\SmartEqualizerAPO'}</span>
-        </span>
-        <span class="h-3 w-px bg-border/60 hidden md:inline-block"></span>
-        <span>
-          APO EQ config:
-          <span class="ml-1 font-mono text-foreground">{library?.configPath ?? '%ProgramFiles%\\EqualizerAPO\\config'}</span>
-        </span>
-        <span class="h-3 w-px bg-border/60 hidden md:inline-block"></span>
-        <label
-          class={`inline-flex items-center gap-2 ${autorunLoaded ? 'text-muted' : 'text-muted/70'}`}
-          title="Launch the app automatically when you sign in to Windows"
-        >
-          <input
-            type="checkbox"
-            checked={autorunEnabled}
-            disabled={!autorunLoaded || autorunBusy || busy}
-            onchange={handleAutorunToggle}
-            class="focus-ring size-3.5 rounded border border-border bg-surface-2 accent-accent disabled:cursor-not-allowed disabled:opacity-60"
-          />
-          <span>Launch on Windows startup</span>
-        </label>
-      </div>
-    </footer>
+    <TroubleshootModal
+      open={troubleshootOpen}
+      library={library}
+      onClose={handleCloseTroubleshoot}
+      onInstall={handleInstallOrReinstallApo}
+      onOpenSelector={handleOpenApoDeviceSelector}
+    />
+
+    <LogsModal
+      open={logsOpen}
+      loading={logsLoading}
+      exists={logsExists}
+      logPath={logsPath}
+      content={logsContent}
+      onClose={handleCloseLogs}
+      onRefresh={loadLogsSnapshot}
+      onOpenLocation={handleOpenLogsLocation}
+    />
+
+    <FooterBar
+      statusMessage={statusMessage}
+      statusTone={statusTone}
+      busy={busy}
+      autorunEnabled={autorunEnabled}
+      autorunLoaded={autorunLoaded}
+      autorunBusy={autorunBusy}
+      onOpenLogs={handleOpenLogs}
+      onOpenTroubleshoot={handleOpenTroubleshoot}
+      onOpenAbout={handleOpenAbout}
+      onAutorunToggle={handleAutorunToggle}
+    />
   </div>
 </div>

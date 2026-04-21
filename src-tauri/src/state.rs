@@ -17,6 +17,8 @@ use winreg::{
     RegKey,
 };
 
+use crate::logging::append_log_line;
+
 pub const APP_FOLDER_NAME: &str = "SmartEqualizerAPO";
 pub const EVENT_PRESETS_UPDATED: &str = "smart-equalizer://presets-updated";
 pub const EVENT_SETTINGS_UPDATED: &str = "smart-equalizer://settings-updated";
@@ -50,7 +52,7 @@ pub enum AppError {
     UnknownMenuItem(String),
     #[error("The Equalizer APO config path registry entry is missing.")]
     RegistryValueMissing,
-    #[error("Administrator privileges are required to update the Equalizer APO config path. Please accept the UAC prompt, or run the application as administrator.")]
+    #[error("Administrator privileges were declined. Please accept the UAC prompt, or run the application as administrator.")]
     ElevationDeclined,
     #[error("{0}")]
     Message(String),
@@ -217,6 +219,7 @@ impl AppState {
 
 impl AppStateInner {
     pub fn snapshot(&mut self) -> Result<PresetLibrary, AppError> {
+        self.refresh_runtime_paths();
         self.sync_metadata_with_disk()?;
         self.normalize_single_active_selection();
 
@@ -269,6 +272,14 @@ impl AppStateInner {
             needs_config_migration: !self.is_config_path_writable()?,
             config_path_prompted: self.metadata.config_path_prompted,
         })
+    }
+
+    fn refresh_runtime_paths(&mut self) {
+        self.detected_install_config_path = detect_installed_config_path();
+        self.current_config_path = read_registry_config_path()
+            .ok()
+            .or_else(|| self.detected_install_config_path.clone())
+            .unwrap_or_else(|| self.default_config_path.clone());
     }
 
     fn build_convolution_state(&self, content: &str) -> Option<PresetConvolution> {
@@ -1200,7 +1211,7 @@ pub fn try_handle_cli_mode() -> Option<i32> {
             let exit_code = match write_registry_config_path(Path::new(&path)) {
                 Ok(()) => 0,
                 Err(error) => {
-                    eprintln!("{error}");
+                    append_log_line("ERROR", error.to_string());
                     1
                 }
             };
@@ -1228,7 +1239,7 @@ pub fn try_handle_cli_mode() -> Option<i32> {
             ) {
                 Ok(()) => 0,
                 Err(error) => {
-                    eprintln!("{error}");
+                    append_log_line("ERROR", error.to_string());
                     1
                 }
             };
@@ -1257,13 +1268,18 @@ fn read_registry_config_path() -> Result<PathBuf, AppError> {
 }
 
 fn detect_installed_config_path() -> Option<PathBuf> {
+    let install_path = detect_installed_install_path()?;
+    let config_path = install_path.join("config");
+    config_path.exists().then_some(config_path)
+}
+
+pub(crate) fn detect_installed_install_path() -> Option<PathBuf> {
     let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
     let key = hklm
         .open_subkey_with_flags(REGISTRY_KEY_PATH, KEY_READ | KEY_WOW64_64KEY)
         .ok()?;
     let install_path: String = key.get_value(REGISTRY_INSTALL_PATH_VALUE_NAME).ok()?;
-    let config_path = PathBuf::from(install_path).join("config");
-    config_path.exists().then_some(config_path)
+    Some(PathBuf::from(install_path))
 }
 
 fn write_registry_config_path(path: &Path) -> Result<(), std::io::Error> {
@@ -1310,16 +1326,32 @@ fn run_elevated_live_config_helper(
     result
 }
 
-fn run_elevated_cli(arguments: &[String]) -> Result<(), AppError> {
-    let current_exe = env::current_exe()?;
+pub(crate) fn classify_elevation_failure(
+    exit_code: Option<i32>,
+    stdout: &str,
+    stderr: &str,
+    fallback_message: String,
+) -> AppError {
+    if is_user_declined_elevation(exit_code, stdout, stderr) {
+        return AppError::ElevationDeclined;
+    }
+
+    if let Some(message) = combine_shell_output(stdout, stderr) {
+        return AppError::Message(message);
+    }
+
+    AppError::Message(fallback_message)
+}
+
+pub(crate) fn run_elevated_process(file_path: &Path, arguments: &[String]) -> Result<(), AppError> {
     let escaped_arguments = arguments
         .iter()
         .map(|value| format!("'\"{}\"'", escape_for_powershell(value)))
         .collect::<Vec<_>>()
         .join(", ");
     let command = format!(
-        "$process = Start-Process -FilePath '{}' -ArgumentList @({}) -Verb RunAs -Wait -PassThru; exit $process.ExitCode",
-        escape_for_powershell(current_exe.as_os_str().to_string_lossy().as_ref()),
+        "$process = Start-Process -FilePath '{}' -ArgumentList @({}) -Verb RunAs -Wait -PassThru -ErrorAction Stop; exit $process.ExitCode",
+        escape_for_powershell(file_path.as_os_str().to_string_lossy().as_ref()),
         escaped_arguments,
     );
 
@@ -1337,12 +1369,27 @@ fn run_elevated_cli(arguments: &[String]) -> Result<(), AppError> {
                 "-Command",
                 command.as_str(),
             ])
-            .status();
+            .output();
 
         match result {
-            Ok(status) if status.success() => return Ok(()),
-            Ok(_status) => {
-                return Err(AppError::ElevationDeclined);
+            Ok(output) if output.status.success() => return Ok(()),
+            Ok(output) => {
+                let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+                let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                let fallback_message = format!(
+                    "The elevated PowerShell command '{}' exited with code {}.",
+                    file_path.display(),
+                    output
+                        .status
+                        .code()
+                        .map_or_else(|| "unknown".to_string(), |code| code.to_string())
+                );
+                return Err(classify_elevation_failure(
+                    output.status.code(),
+                    stdout.as_str(),
+                    stderr.as_str(),
+                    fallback_message,
+                ));
             }
             Err(error) => {
                 last_error = Some(error);
@@ -1352,7 +1399,15 @@ fn run_elevated_cli(arguments: &[String]) -> Result<(), AppError> {
     }
 
     // If we get here, both shells failed
-    Err(last_error.map_or(AppError::ElevationDeclined, |e| e.into()))
+    Err(last_error.map_or_else(
+        || AppError::Message("Unable to start an elevated PowerShell shell.".to_string()),
+        |error| error.into(),
+    ))
+}
+
+fn run_elevated_cli(arguments: &[String]) -> Result<(), AppError> {
+    let current_exe = env::current_exe()?;
+    run_elevated_process(current_exe.as_path(), arguments)
 }
 
 fn write_elevated_live_config(
@@ -1806,4 +1861,69 @@ fn relative_path(from_dir: &Path, target: &Path) -> Option<PathBuf> {
 
 fn escape_for_powershell(value: &str) -> String {
     value.replace('\'', "''")
+}
+
+fn combine_shell_output(stdout: &str, stderr: &str) -> Option<String> {
+    let mut parts = Vec::new();
+    let stderr = stderr.trim();
+    if !stderr.is_empty() {
+        parts.push(stderr.to_string());
+    }
+
+    let stdout = stdout.trim();
+    if !stdout.is_empty() {
+        parts.push(stdout.to_string());
+    }
+
+    if parts.is_empty() {
+        None
+    } else {
+        Some(parts.join("\n"))
+    }
+}
+
+fn is_user_declined_elevation(exit_code: Option<i32>, stdout: &str, stderr: &str) -> bool {
+    if exit_code == Some(1223) {
+        return true;
+    }
+
+    let combined = format!("{stderr}\n{stdout}").to_ascii_lowercase();
+    combined.contains("canceled by the user")
+        || combined.contains("cancelled by the user")
+        || combined.contains("operation was canceled")
+        || combined.contains("operation was cancelled")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn classify_elevation_failure_should_preserve_stderr() {
+        let error = classify_elevation_failure(
+            Some(1),
+            "",
+            "Start-Process failed with an unexpected error.",
+            "fallback".to_string(),
+        );
+
+        match error {
+            AppError::Message(message) => {
+                assert_eq!(message, "Start-Process failed with an unexpected error.");
+            }
+            other => panic!("expected message error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn classify_elevation_failure_should_treat_cancelled_prompt_as_declined() {
+        let error = classify_elevation_failure(
+            Some(1),
+            "",
+            "The operation was canceled by the user.",
+            "fallback".to_string(),
+        );
+
+        assert!(matches!(error, AppError::ElevationDeclined));
+    }
 }
